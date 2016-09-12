@@ -134,7 +134,6 @@ struct mtx_padalign pa_lock[PA_LOCK_COUNT];
 vm_page_t vm_page_array;
 long vm_page_array_size;
 long first_page;
-int vm_page_zero_count;
 
 static int boot_pages = UMA_BOOT_PAGES;
 SYSCTL_INT(_vm, OID_AUTO, boot_pages, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
@@ -1030,8 +1029,8 @@ vm_page_free_zero(vm_page_t m)
 }
 
 /*
- * Unbusy and handle the page queueing for a page from the VOP_GETPAGES()
- * array which was optionally read ahead or behind.
+ * Unbusy and handle the page queueing for a page from a getpages request that
+ * was optionally read ahead or behind.
  */
 void
 vm_page_readahead_finish(vm_page_t m)
@@ -1712,8 +1711,7 @@ vm_page_alloc(vm_object_t object, vm_pindex_t pindex, int req)
 	    ("vm_page_alloc: page %p has unexpected queue %d", m, m->queue));
 	KASSERT(m->wire_count == 0, ("vm_page_alloc: page %p is wired", m));
 	KASSERT(m->hold_count == 0, ("vm_page_alloc: page %p is held", m));
-	KASSERT(!vm_page_sbusied(m),
-	    ("vm_page_alloc: page %p is busy", m));
+	KASSERT(!vm_page_busied(m), ("vm_page_alloc: page %p is busy", m));
 	KASSERT(m->dirty == 0, ("vm_page_alloc: page %p is dirty", m));
 	KASSERT(pmap_page_get_memattr(m) == VM_MEMATTR_DEFAULT,
 	    ("vm_page_alloc: page %p has unexpected memattr %d", m,
@@ -1736,8 +1734,6 @@ vm_page_alloc(vm_object_t object, vm_pindex_t pindex, int req)
 		KASSERT(m->valid == 0,
 		    ("vm_page_alloc: free page %p is valid", m));
 		vm_phys_freecnt_adj(m, -1);
-		if ((m->flags & PG_ZERO) != 0)
-			vm_page_zero_count--;
 	}
 	mtx_unlock(&vm_page_queue_free_mtx);
 
@@ -2021,7 +2017,7 @@ vm_page_alloc_init(vm_page_t m)
 	    ("vm_page_alloc_init: page %p is wired", m));
 	KASSERT(m->hold_count == 0,
 	    ("vm_page_alloc_init: page %p is held", m));
-	KASSERT(!vm_page_sbusied(m),
+	KASSERT(!vm_page_busied(m),
 	    ("vm_page_alloc_init: page %p is busy", m));
 	KASSERT(m->dirty == 0,
 	    ("vm_page_alloc_init: page %p is dirty", m));
@@ -2043,8 +2039,6 @@ vm_page_alloc_init(vm_page_t m)
 		KASSERT(m->valid == 0,
 		    ("vm_page_alloc_init: free page %p is valid", m));
 		vm_phys_freecnt_adj(m, -1);
-		if ((m->flags & PG_ZERO) != 0)
-			vm_page_zero_count--;
 	}
 	return (drop);
 }
@@ -2598,7 +2592,6 @@ cached:
 #endif
 				vm_phys_free_pages(m, 0);
 		} while ((m = SLIST_FIRST(&free)) != NULL);
-		vm_page_zero_idle_wakeup();
 		vm_page_free_wakeup();
 		mtx_unlock(&vm_page_queue_free_mtx);
 	}
@@ -3042,10 +3035,6 @@ vm_page_free_toq(vm_page_t m)
 		if (TRUE)
 #endif
 			vm_phys_free_pages(m, 0);
-		if ((m->flags & PG_ZERO) != 0)
-			++vm_page_zero_count;
-		else
-			vm_page_zero_idle_wakeup();
 		vm_page_free_wakeup();
 		mtx_unlock(&vm_page_queue_free_mtx);
 	}

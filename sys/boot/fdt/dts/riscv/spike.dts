@@ -50,13 +50,13 @@
 		cpu@0 {
 			device_type = "cpu";
 			compatible = "riscv,rv64";
-			reg = <0x40001000>;
+			reg = <0x0>;
 		};
 
 		cpu@1 {
 			device_type = "cpu";
 			compatible = "riscv,rv64";
-			reg = <0x40002000>;
+			reg = <0x0>;
 		};
 	};
 
@@ -65,6 +65,10 @@
 	};
 
 	memory {
+		/*
+		 * This is not used currently.
+		 * We take information from sbi_query_memory.
+		 */
 		device_type = "memory";
 		reg = <0x80000000 0x40000000>; /* 1GB at 0x80000000 */
 	};
@@ -84,21 +88,18 @@
 
 		timer0: timer@0 {
 			compatible = "riscv,timer";
-			reg = < 0x40000000 0x100 >;
+			reg = < 0x40000000 0x0008 >,	/* rtc */
+			      < 0x40000008 0x1000 >;	/* timecmp */
 			interrupts = < 5 >;
 			interrupt-parent = < &pic0 >;
 			clock-frequency = < 1000000 >;
 		};
 
-		htif0: htif@0 {
-			compatible = "riscv,htif";
+		console0: console@0 {
+			compatible = "riscv,console";
+			status = "okay";
 			interrupts = < 1 >;
 			interrupt-parent = < &pic0 >;
-
-			console0: console@0 {
-				compatible = "htif,console";
-				status = "okay";
-			};
 		};
 	};
 

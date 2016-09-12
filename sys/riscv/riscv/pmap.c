@@ -220,6 +220,14 @@ vm_offset_t kernel_vm_end = 0;
 
 struct msgbuf *msgbufp = NULL;
 
+vm_paddr_t dmap_phys_base;	/* The start of the dmap region */
+vm_paddr_t dmap_phys_max;	/* The limit of the dmap region */
+vm_offset_t dmap_max_addr;	/* The virtual address limit of the dmap */
+
+/* This code assumes all L1 DMAP entries will be used */
+CTASSERT((DMAP_MIN_ADDRESS  & ~L1_OFFSET) == DMAP_MIN_ADDRESS);
+CTASSERT((DMAP_MAX_ADDRESS  & ~L1_OFFSET) == DMAP_MAX_ADDRESS);
+
 static struct rwlock_padalign pvh_global_lock;
 
 /*
@@ -458,6 +466,10 @@ pmap_early_vtophys(vm_offset_t l1pt, vm_offset_t va)
 
 	l2 = pmap_early_page_idx(l1pt, va, &l1_slot, &l2_slot);
 
+	/* Check locore has used L2 superpages */
+	KASSERT((l2[l2_slot] & PTE_RX) != 0,
+		("Invalid bootstrap L2 table"));
+
 	/* L2 is superpages */
 	ret = (l2[l2_slot] >> PTE_PPN1_S) << L2_SHIFT;
 	ret += (va & L2_OFFSET);
@@ -466,7 +478,7 @@ pmap_early_vtophys(vm_offset_t l1pt, vm_offset_t va)
 }
 
 static void
-pmap_bootstrap_dmap(vm_offset_t l1pt, vm_paddr_t kernstart)
+pmap_bootstrap_dmap(vm_offset_t kern_l1, vm_paddr_t min_pa, vm_paddr_t max_pa)
 {
 	vm_offset_t va;
 	vm_paddr_t pa;
@@ -475,19 +487,12 @@ pmap_bootstrap_dmap(vm_offset_t l1pt, vm_paddr_t kernstart)
 	pt_entry_t entry;
 	pn_t pn;
 
-	/*
-	 * Initialize DMAP starting from zero physical address.
-	 * TODO: remove this once machine-mode code splitted out.
-	 */
-	kernstart = 0;
-	printf("%s: l1pt 0x%016lx kernstart 0x%016lx\n", __func__, l1pt, kernstart);
-
-	pa = kernstart & ~L1_OFFSET;
+	pa = dmap_phys_base = min_pa & ~L1_OFFSET;
 	va = DMAP_MIN_ADDRESS;
-	l1 = (pd_entry_t *)l1pt;
+	l1 = (pd_entry_t *)kern_l1;
 	l1_slot = pmap_l1_index(DMAP_MIN_ADDRESS);
 
-	for (; va < DMAP_MAX_ADDRESS;
+	for (; va < DMAP_MAX_ADDRESS && pa < max_pa;
 	    pa += L1_SIZE, va += L1_SIZE, l1_slot++) {
 		KASSERT(l1_slot < Ln_ENTRIES, ("Invalid L1 index"));
 
@@ -497,6 +502,10 @@ pmap_bootstrap_dmap(vm_offset_t l1pt, vm_paddr_t kernstart)
 		entry |= (pn << PTE_PPN0_S);
 		pmap_load_store(&l1[l1_slot], entry);
 	}
+
+	/* Set the upper limit of the DMAP region */
+	dmap_phys_max = pa;
+	dmap_max_addr = va;
 
 	cpu_dcache_wb_range((vm_offset_t)l1, PAGE_SIZE);
 	cpu_tlb_flushID();
@@ -552,7 +561,7 @@ pmap_bootstrap(vm_offset_t l1pt, vm_paddr_t kernstart, vm_size_t kernlen)
 	pt_entry_t *l2;
 	vm_offset_t va, freemempos;
 	vm_offset_t dpcpu, msgbufpv;
-	vm_paddr_t pa, min_pa;
+	vm_paddr_t pa, min_pa, max_pa;
 	int i;
 
 	kern_delta = KERNBASE - kernstart;
@@ -574,7 +583,7 @@ pmap_bootstrap(vm_offset_t l1pt, vm_paddr_t kernstart, vm_size_t kernlen)
 	LIST_INIT(&allpmaps);
 
 	/* Assume the address we were loaded to is a valid physical address */
-	min_pa = KERNBASE - kern_delta;
+	min_pa = max_pa = KERNBASE - kern_delta;
 
 	/*
 	 * Find the minimum physical address. physmap is sorted,
@@ -585,11 +594,13 @@ pmap_bootstrap(vm_offset_t l1pt, vm_paddr_t kernstart, vm_size_t kernlen)
 			continue;
 		if (physmap[i] <= min_pa)
 			min_pa = physmap[i];
+		if (physmap[i + 1] > max_pa)
+			max_pa = physmap[i + 1];
 		break;
 	}
 
 	/* Create a direct map region early so we can use it for pa -> va */
-	pmap_bootstrap_dmap(l1pt, min_pa);
+	pmap_bootstrap_dmap(l1pt, min_pa, max_pa);
 
 	va = KERNBASE;
 	pa = KERNBASE - kern_delta;
@@ -2527,20 +2538,6 @@ pmap_zero_page_area(vm_page_t m, int off, int size)
 }
 
 /*
- *	pmap_zero_page_idle zeros the specified hardware page by mapping 
- *	the page into KVM and using bzero to clear its contents.  This
- *	is intended to be called from the vm_pagezero process only and
- *	outside of Giant.
- */
-void
-pmap_zero_page_idle(vm_page_t m)
-{
-	vm_offset_t va = PHYS_TO_DMAP(VM_PAGE_TO_PHYS(m));
-
-	pagezero((void *)va);
-}
-
-/*
  *	pmap_copy_page copies the specified (machine independent)
  *	page by mapping the page into virtual memory and using
  *	bcopy to copy the page, one machine dependent page at a
@@ -2994,8 +2991,6 @@ safe_to_clear_referenced(pmap_t pmap, pt_entry_t pte)
 	return (FALSE);
 }
 
-#define	PMAP_TS_REFERENCED_MAX	5
-
 /*
  *	pmap_ts_referenced:
  *
@@ -3004,9 +2999,13 @@ safe_to_clear_referenced(pmap_t pmap, pt_entry_t pte)
  *	is necessary that 0 only be returned when there are truly no
  *	reference bits set.
  *
- *	XXX: The exact number of bits to check and clear is a matter that
- *	should be tested and standardized at some point in the future for
- *	optimal aging of shared pages.
+ *	As an optimization, update the page's dirty field if a modified bit is
+ *	found while counting reference bits.  This opportunistic update can be
+ *	performed at low cost and can eliminate the need for some future calls
+ *	to pmap_is_modified().  However, since this function stops after
+ *	finding PMAP_TS_REFERENCED_MAX reference bits, it may not detect some
+ *	dirty pages.  Those dirty pages will only be detected by a future call
+ *	to pmap_is_modified().
  */
 int
 pmap_ts_referenced(vm_page_t m)
@@ -3015,7 +3014,7 @@ pmap_ts_referenced(vm_page_t m)
 	pmap_t pmap;
 	struct rwlock *lock;
 	pd_entry_t *l2;
-	pt_entry_t *l3;
+	pt_entry_t *l3, old_l3;
 	vm_paddr_t pa;
 	int cleared, md_gen, not_cleared;
 	struct spglist free;
@@ -3053,15 +3052,18 @@ retry:
 		    ("pmap_ts_referenced: found an invalid l2 table"));
 
 		l3 = pmap_l2_to_l3(l2, pv->pv_va);
-		if ((pmap_load(l3) & PTE_A) != 0) {
-			if (safe_to_clear_referenced(pmap, pmap_load(l3))) {
+		old_l3 = pmap_load(l3);
+		if (pmap_page_dirty(old_l3))
+			vm_page_dirty(m);
+		if ((old_l3 & PTE_A) != 0) {
+			if (safe_to_clear_referenced(pmap, old_l3)) {
 				/*
 				 * TODO: We don't handle the access flag
 				 * at all. We need to be able to set it in
 				 * the exception handler.
 				 */
 				panic("RISCVTODO: safe_to_clear_referenced\n");
-			} else if ((pmap_load(l3) & PTE_SW_WIRED) == 0) {
+			} else if ((old_l3 & PTE_SW_WIRED) == 0) {
 				/*
 				 * Wired pages cannot be paged out so
 				 * doing accessed bit emulation for
