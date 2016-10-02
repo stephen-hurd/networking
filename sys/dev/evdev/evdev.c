@@ -33,6 +33,7 @@
 #include <sys/systm.h>
 #include <sys/param.h>
 #include <sys/kernel.h>
+#include <sys/module.h>
 #include <sys/conf.h>
 #include <sys/malloc.h>
 #include <sys/bitstring.h>
@@ -92,7 +93,8 @@ void
 evdev_free(struct evdev_dev *evdev)
 {
 
-	if (evdev->ev_cdev != NULL && evdev->ev_cdev->si_drv1 != NULL)
+	if (evdev != NULL && evdev->ev_cdev != NULL &&
+	    evdev->ev_cdev->si_drv1 != NULL)
 		evdev_unregister(evdev);
 
 	free(evdev, M_EVDEV);
@@ -915,3 +917,5 @@ evdev_stop_repeat(struct evdev_dev *evdev)
 		evdev->ev_rep_key = KEY_RESERVED;
 	}
 }
+
+MODULE_VERSION(evdev, 1);
