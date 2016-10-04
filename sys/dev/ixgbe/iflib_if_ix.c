@@ -3247,9 +3247,6 @@ ixgbe_if_init(if_ctx_t ctx)
 		IXGBE_WRITE_REG(hw, IXGBE_CTRL_EXT, reg);
 	}
 #endif
-
-	/* Now inform the stack we're ready */
-	ifp->if_drv_flags |= IFF_DRV_RUNNING;
 }
 
 /*
