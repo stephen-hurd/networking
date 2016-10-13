@@ -1918,7 +1918,7 @@ ixl_set_promisc(struct ixl_vsi *vsi)
 		uni = TRUE;
 
 	err = i40e_aq_set_vsi_unicast_promiscuous(hw,
-	    vsi->seid, uni, NULL);
+	    vsi->seid, uni, NULL, TRUE);
 	err = i40e_aq_set_vsi_multicast_promiscuous(hw,
 	    vsi->seid, multi, NULL);
 	return;
@@ -7119,7 +7119,7 @@ ixl_vf_config_promisc_msg(struct ixl_pf *pf, struct ixl_vf *vf,
 	}
 
 	code = i40e_aq_set_vsi_unicast_promiscuous(&pf->hw, info->vsi_id,
-	    info->flags & I40E_FLAG_VF_UNICAST_PROMISC, NULL);
+	    info->flags & I40E_FLAG_VF_UNICAST_PROMISC, NULL, TRUE);
 	if (code != I40E_SUCCESS) {
 		i40e_send_vf_nack(pf, vf,
 		    I40E_VIRTCHNL_OP_CONFIG_PROMISCUOUS_MODE, code);

@@ -30,6 +30,7 @@ options 	INET			# InterNETworking
 options 	INET6			# IPv6 communications protocols
 options 	IPSEC			# IP (v4/v6) security
 options 	TCP_OFFLOAD		# TCP offload
+options 	TCP_HHOOK		# hhook(9) framework for TCP
 options 	SCTP			# Stream Control Transmission Protocol
 options 	FFS			# Berkeley Fast Filesystem
 options 	SOFTUPDATES		# Enable FFS soft updates support
@@ -228,8 +229,8 @@ device		em			# Intel PRO/1000 Gigabit Ethernet Family
 device		igb			# Intel PRO/1000 PCIE Server Gigabit Family
 device		ix			# Intel PRO/10GbE PCIE PF Ethernet
 device		ixv			# Intel PRO/10GbE PCIE VF Ethernet
-device		ixl			# Intel XL710 40Gbe PCIE Ethernet
-device		ixlv			# Intel XL710 40Gbe VF PCIE Ethernet
+#device		ixl			# Intel XL710 40Gbe PCIE Ethernet
+#device		ixlv			# Intel XL710 40Gbe VF PCIE Ethernet
 device		le			# AMD Am7900 LANCE and Am79C9xx PCnet
 device		ti			# Alteon Networks Tigon I/II gigabit Ethernet
 device		txp			# 3Com 3cR990 (``Typhoon'')

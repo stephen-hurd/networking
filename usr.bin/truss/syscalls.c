@@ -281,6 +281,8 @@ static struct syscall decoded_syscalls[] = {
 	  .args = { { Atfd, 0 }, { Name, 1 }, { Atfd, 2 }, { Name, 3 } } },
 	{ .name = "rfork", .ret_type = 1, .nargs = 1,
 	  .args = { { Rforkflags, 0 } } },
+	{ .name = "rmdir", .ret_type = 1, .nargs = 1,
+	  .args = { { Name, 0 } } },
 	{ .name = "select", .ret_type = 1, .nargs = 5,
 	  .args = { { Int, 0 }, { Fd_set, 1 }, { Fd_set, 2 }, { Fd_set, 3 },
 		    { Timeval, 4 } } },
@@ -493,8 +495,6 @@ static struct syscall decoded_syscalls[] = {
 	            { CloudABISSFlags, 2 } } },
 	{ .name = "cloudabi_sys_thread_exit", .ret_type = 1, .nargs = 2,
 	  .args = { { Ptr, 0 }, { CloudABIMFlags, 1 } } },
-	{ .name = "cloudabi_sys_thread_tcb_set", .ret_type = 1, .nargs = 1,
-	  .args = { { Ptr, 0 } } },
 	{ .name = "cloudabi_sys_thread_yield", .ret_type = 1, .nargs = 0 },
 
 	{ .name = 0 },
@@ -1924,9 +1924,9 @@ print_arg(struct syscall_args *sc, unsigned long *args, long *retval,
 		cloudabi_filestat_t fsb;
 		if (get_struct(pid, (void *)args[sc->offset], &fsb, sizeof(fsb))
 		    != -1)
-			fprintf(fp, "{ %s, %lu }",
+			fprintf(fp, "{ %s, %ju }",
 			    xlookup(cloudabi_filetype, fsb.st_filetype),
-			    fsb.st_size);
+			    (uintmax_t)fsb.st_size);
 		else
 			fprintf(fp, "0x%lx", args[sc->offset]);
 		break;
