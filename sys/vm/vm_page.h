@@ -226,7 +226,6 @@ struct vm_domain {
 	u_int vmd_free_count;
 	long vmd_segs;	/* bitmask of the segments */
 	boolean_t vmd_oom;
-	int vmd_pass;	/* local pagedaemon pass */
 	int vmd_oom_seq;
 	int vmd_last_active_scan;
 	struct vm_page vmd_marker; /* marker for pagedaemon private use */
@@ -437,7 +436,7 @@ malloc2vm_flags(int malloc_flags)
 #endif
 
 void vm_page_busy_downgrade(vm_page_t m);
-void vm_page_busy_sleep(vm_page_t m, const char *msg);
+void vm_page_busy_sleep(vm_page_t m, const char *msg, bool nonshared);
 void vm_page_flash(vm_page_t m);
 void vm_page_hold(vm_page_t mem);
 void vm_page_unhold(vm_page_t mem);
@@ -504,7 +503,6 @@ void vm_page_test_dirty (vm_page_t);
 vm_page_bits_t vm_page_bits(int base, int size);
 void vm_page_zero_invalid(vm_page_t m, boolean_t setvalid);
 void vm_page_free_toq(vm_page_t m);
-void vm_page_zero_idle_wakeup(void);
 
 void vm_page_dirty_KBI(vm_page_t m);
 void vm_page_lock_KBI(vm_page_t m, const char *file, int line);

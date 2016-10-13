@@ -842,7 +842,7 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 		KASSERT(rblk != NULL,
 		    ("cannot find blk %p out of syncache?", blk));
 		if (tp->t_fb->tfb_tcp_fb_fini)
-			(*tp->t_fb->tfb_tcp_fb_fini)(tp);
+			(*tp->t_fb->tfb_tcp_fb_fini)(tp, 0);
 		refcount_release(&tp->t_fb->tfb_refcnt);
 		tp->t_fb = rblk;
 		if (tp->t_fb->tfb_tcp_fb_init) {
@@ -918,7 +918,9 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 	tp->t_keepcnt = sototcpcb(lso)->t_keepcnt;
 	tcp_timer_activate(tp, TT_KEEP, TP_KEEPINIT(tp));
 
-	soisconnected(so);
+	if ((so->so_options & SO_ACCEPTFILTER) == 0) {
+		soisconnected(so);
+	}
 
 	TCPSTAT_INC(tcps_accepts);
 	return (so);
@@ -1207,7 +1209,7 @@ syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	ltflags = (tp->t_flags & (TF_NOOPT | TF_SIGNATURE));
 
 #ifdef TCP_RFC7413
-	if (V_tcp_fastopen_enabled && (tp->t_flags & TF_FASTOPEN) &&
+	if (V_tcp_fastopen_enabled && IS_FASTOPEN(tp->t_flags) &&
 	    (tp->t_tfo_pending != NULL) && (to->to_flags & TOF_FASTOPEN)) {
 		/*
 		 * Limit the number of pending TFO connections to
