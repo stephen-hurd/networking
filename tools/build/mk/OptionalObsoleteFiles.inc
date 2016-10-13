@@ -1089,6 +1089,7 @@ OLD_FILES+=boot/gptzfsboot
 OLD_FILES+=boot/zfsboot
 OLD_FILES+=boot/zfsloader
 OLD_FILES+=etc/rc.d/zfs
+OLD_FILES+=etc/rc.d/zfsbe
 OLD_FILES+=etc/rc.d/zvol
 OLD_FILES+=etc/devd/zfs.conf
 OLD_FILES+=etc/periodic/daily/404.status-zfs
@@ -6012,6 +6013,10 @@ OLD_FILES+=usr/share/man/man8/makewhatis.local.8.gz
 OLD_FILES+=usr/share/man/man8/manctl.8.gz
 OLD_FILES+=usr/share/man/whatis
 OLD_FILES+=usr/share/openssl/man/whatis
+.endif
+
+.if ${MK_MANDOCDB} != no
+OLD_FILES+=usr/share/man/man1/makewhatis.1.gz
 .endif
 
 .if ${MK_NDIS} == no
