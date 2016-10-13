@@ -93,6 +93,9 @@ __FBSDID("$FreeBSD$");
 #include <x86/iommu/busdma_dmar.h>
 #endif
 
+#define IFLIB_DIAGNOSTICS 1
+
+
 
 #ifdef IFLIB_DIAGNOSTICS
 #define DPRINTF printf
@@ -4374,14 +4377,14 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 	err = _iflib_irq_alloc(ctx, irq, rid, iflib_fast_intr, NULL, info,  name);
 	if (err != 0)
 		return (err);
-	DPRINTF("%s name=%s rid=%d\n", __FUNCTION__, name, tqrid)
+	DPRINTF("%s name=%s rid=%d\n", __FUNCTION__, name, tqrid);
 	if (tqrid != -1) {
 		cpuid = find_nth(ctx, &cpus, qid);
 		DPRINTF("%s find_nth(qid=%d) => cpuid=%d\n", __FUNCTION__, qid, cpuid);
 		taskqgroup_attach_cpu(tqg, gtask, q, cpuid, irq->ii_rid, name);
 	} else {
 		taskqgroup_attach(tqg, gtask, q, tqrid, name);
-		DPRINTF("%s attached to gtask->gt_cpu=%d\n", __FUNCTION__, gtast->gt_cpu);
+		DPRINTF("%s attached to gtask->gt_cpu=%d\n", __FUNCTION__, gtask->gt_cpu);
 	}
 
 	return (0);
