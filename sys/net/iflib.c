@@ -4383,7 +4383,7 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 	} else {
 		taskqgroup_attach(tqg, gtask, q, tqrid, name);
 	}
-	DPRINTF("%s attached to gtask->gt_cpu=%d\n", __FUNCTION__, gtask->gt_cpu);
+	DPRINTF("%s attached to gtask->gt_cpu=%d q=%p\n", __FUNCTION__, gtask->gt_cpu, q);
 
 	return (0);
 }
