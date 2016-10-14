@@ -365,6 +365,9 @@ struct iflib_txq {
 	char                    ift_mtx_name[MTX_NAME_LEN];
 	char                    ift_db_mtx_name[MTX_NAME_LEN];
 	bus_dma_segment_t	ift_segs[IFLIB_MAX_TX_SEGS]  __aligned(CACHE_LINE_SIZE);
+#ifdef IFLIB_DIAGNOSTICS
+	uint64_t ift_cpu_exec_count[256];
+#endif
 } __aligned(CACHE_LINE_SIZE);
 
 struct iflib_fl {
@@ -441,6 +444,9 @@ struct iflib_rxq {
 	iflib_dma_info_t		ifr_ifdi;
 	/* dynamically allocate if any drivers need a value substantially larger than this */
 	struct if_rxd_frag	ifr_frags[IFLIB_MAX_RX_SEGS] __aligned(CACHE_LINE_SIZE);
+#ifdef IFLIB_DIAGNOSTICS
+	uint64_t ifr_cpu_exec_count[256];
+#endif
 }  __aligned(CACHE_LINE_SIZE);
 
 /*
@@ -2955,6 +2961,9 @@ _task_fn_tx(void *context)
 	iflib_txq_t txq = context;
 	if_ctx_t ctx = txq->ift_ctx;
 
+#ifdef IFLIB_DIAGNOSTICS
+	txq->ift_cpu_exec_count[curcpu]++;
+#endif
 	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
 		return;
 	ifmp_ring_check_drainage(txq->ift_br[0], TX_BATCH_SIZE);
@@ -2968,6 +2977,9 @@ _task_fn_rx(void *context)
 	bool more;
 	int rc;
 
+#ifdef IFLIB_DIAGNOSTICS
+	rxq->ifr_cpu_exec_count[curcpu]++;
+#endif
 	DBG_COUNTER_INC(task_fn_rxs);
 	if (__predict_false(!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)))
 		return;
@@ -4972,7 +4984,14 @@ iflib_add_device_sysctl_post(if_ctx_t ctx)
 		SYSCTL_ADD_COUNTER_U64(ctx_list, queue_list, OID_AUTO, "r_abdications",
 				       CTLFLAG_RD, &txq->ift_br[0]->abdications,
 				       "# of consumer abdications in the mp_ring for this queue");
-
+#ifdef IFLIB_DIAGNOSTICS
+		for (j = 0; j < mp_ncpus; j++) {
+			snprintf(namebuf, NAME_BUFLEN, "cpu%d", j);
+			SYSCTL_ADD_QUAD(ctx_list, queue_list, OID_AUTO, namebuf,
+				   CTLFLAG_RD,
+				   &txq->ift_cpu_exec_count[j], "# of tx on cpu");
+		}
+#endif
 	}
 
 	if (scctx->isc_nrxqsets > 100)
@@ -4994,6 +5013,15 @@ iflib_add_device_sysctl_post(if_ctx_t ctx)
 				       CTLFLAG_RD,
 				       &rxq->ifr_cq_cidx, 1, "Consumer Index");
 		}
+#ifdef IFLIB_DIAGNOSTICS
+		for (j = 0; j < mp_ncpus; j++) {
+			snprintf(namebuf, NAME_BUFLEN, "cpu%d", j);
+			SYSCTL_ADD_QUAD(ctx_list, queue_list, OID_AUTO, namebuf,
+				   CTLFLAG_RD,
+				   &rxq->ifr_cpu_exec_count[j], "# of rx on cpu");
+		}
+#endif
+
 		for (j = 0, fl = rxq->ifr_fl; j < rxq->ifr_nfl; j++, fl++) {
 			snprintf(namebuf, NAME_BUFLEN, "rxq_fl%d", j);
 			fl_node = SYSCTL_ADD_NODE(ctx_list, queue_list, OID_AUTO, namebuf,
