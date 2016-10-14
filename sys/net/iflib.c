@@ -4336,6 +4336,7 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 	void *q;
 
 	info = &ctx->ifc_filter_info;
+	tqrid = rid;
 
 	switch (type) {
 	/* XXX merge tx/rx for netmap? */
@@ -4344,7 +4345,6 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 		info = &ctx->ifc_txqs[qid].ift_filter_info;
 		gtask = &ctx->ifc_txqs[qid].ift_task;
 		tqg = qgroup_if_io_tqg;
-		tqrid = irq->ii_rid;
 		fn = _task_fn_tx;
 		break;
 	case IFLIB_INTR_RX:
@@ -4352,7 +4352,6 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 		info = &ctx->ifc_rxqs[qid].ifr_filter_info;
 		gtask = &ctx->ifc_rxqs[qid].ifr_task;
 		tqg = qgroup_if_io_tqg;
-		tqrid = irq->ii_rid;
 		fn = _task_fn_rx;
 		break;
 	case IFLIB_INTR_ADMIN:
@@ -4360,7 +4359,6 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 		info = &ctx->ifc_filter_info;
 		gtask = &ctx->ifc_admin_task;
 		tqg = qgroup_if_config_tqg;
-		tqrid = -1;
 		fn = _task_fn_admin;
 		break;
 	default:
@@ -4384,8 +4382,8 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 		taskqgroup_attach_cpu(tqg, gtask, q, cpuid, irq->ii_rid, name);
 	} else {
 		taskqgroup_attach(tqg, gtask, q, tqrid, name);
-		DPRINTF("%s attached to gtask->gt_cpu=%d\n", __FUNCTION__, gtask->gt_cpu);
 	}
+	DPRINTF("%s attached to gtask->gt_cpu=%d\n", __FUNCTION__, gtask->gt_cpu);
 
 	return (0);
 }
