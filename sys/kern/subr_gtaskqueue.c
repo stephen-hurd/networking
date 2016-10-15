@@ -820,6 +820,7 @@ _taskqgroup_adjust(struct taskqgroup *qgroup, int cnt, int stride)
 	cpu = CPU_FIRST();
 	for (i = 0; i < cnt; i++) {
 		qgroup->tqg_queue[i].tgc_cpu = cpu;
+		printf("qgroup->tqg_queue[%d].tgc_cpu = %d\n", i, cpu);
 		for (k = 0; k < qgroup->tqg_stride; k++)
 			cpu = CPU_NEXT(cpu);
 		CPU_ZERO(&mask);
