@@ -46,6 +46,15 @@
 #include <netinet/in_rss.h>
 #endif
 
+#undef CSUM_TCP
+#define CSUM_TCP (CSUM_IP_TCP | CSUM_IP6_TCP)
+#undef CSUM_UDP
+#define CSUM_UDP (CSUM_IP_UDP | CSUM_IP6_UDP)
+#undef CSUM_SCTP
+#define CSUM_SCTP (CSUM_IP_SCTP | CSUM_IP6_SCTP)
+
+
+
 /*********************************************************************
  *  Local Function prototypes
  *********************************************************************/
