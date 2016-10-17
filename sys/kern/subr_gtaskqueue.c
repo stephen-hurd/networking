@@ -845,10 +845,10 @@ _taskqgroup_adjust(struct taskqgroup *qgroup, int cnt, int stride)
 	 */
 	cpu = old_cpu;
 	for (i = old_cnt; i < cnt; i++) {
+		taskqgroup_cpu_create(qgroup, i, cpu);
+
 		for (k = 0; k < stride; k++)
 			cpu = CPU_NEXT(cpu);
-
-		taskqgroup_cpu_create(qgroup, i, cpu);
 	}
 	mtx_lock(&qgroup->tqg_lock);
 	qgroup->tqg_cnt = cnt;
