@@ -845,7 +845,7 @@ _taskqgroup_adjust(struct taskqgroup *qgroup, int cnt, int stride)
 	 */
 	cpu = old_cpu;
 	for (i = old_cnt; i < cnt; i++) {
-		for (k = 0; k < qgroup->tqg_stride; k++)
+		for (k = 0; k < stride; k++)
 			cpu = CPU_NEXT(cpu);
 
 		taskqgroup_cpu_create(qgroup, i, cpu);
@@ -874,6 +874,15 @@ _taskqgroup_adjust(struct taskqgroup *qgroup, int cnt, int stride)
 			taskqgroup_attach_deferred(qgroup, gtask);
 	}
 
+#ifdef INVARIANTS
+	mtx_lock(&qgroup->tqg_lock);
+	for (i = 0; i < qgroup->tqg_cnt; i++) {
+		MPASS(qgroup->tqg_queue[i].tgc_taskq != NULL);
+		LIST_FOREACH(gtask, &qgroup->tqg_queue[i].tgc_tasks, gt_list)
+			MPASS(gtask->gt_taskqueue != NULL);
+	}
+	mtx_unlock(&qgroup->tqg_lock);
+#endif
 	/*
 	 * If taskq thread count has been reduced.
 	 */
