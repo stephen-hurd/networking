@@ -52,14 +52,6 @@ static MALLOC_DEFINE(M_GTASKQUEUE, "taskqueue", "Task Queues");
 static void	gtaskqueue_thread_enqueue(void *);
 static void	gtaskqueue_thread_loop(void *arg);
 
-#define GTASKQ_DIAGNOSTICS
-
-#ifdef GTASKQ_DIAGNOSTICS
-#define DPRINTF printf
-#else
-#define DPRINTF(...)
-#endif
-
 struct gtaskqueue_busy {
 	struct gtask	*tb_running;
 	TAILQ_ENTRY(gtaskqueue_busy) tb_link;
@@ -796,12 +788,10 @@ taskqgroup_bind(struct taskqgroup *qgroup)
 	 * Bind taskqueue threads to specific CPUs, if they have been assigned
 	 * one.
 	 */
-	DPRINTF("%s: binding %d threads\n", __FUNCTION__, qgroup->tqg_cnt);
 	for (i = 0; i < qgroup->tqg_cnt; i++) {
 		gtask = malloc(sizeof (*gtask), M_DEVBUF, M_WAITOK);
 		GTASK_INIT(&gtask->bt_task, 0, 0, taskqgroup_binder, gtask);
 		gtask->bt_cpuid = qgroup->tqg_queue[i].tgc_cpu;
-		DPRINTF("%s: binding thread %d to cpu %d\n", __FUNCTION__,  i, gtask->bt_cpuid);
 		grouptaskqueue_enqueue(qgroup->tqg_queue[i].tgc_taskq,
 		    &gtask->bt_task);
 	}

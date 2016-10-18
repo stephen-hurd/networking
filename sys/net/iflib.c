@@ -93,10 +93,6 @@ __FBSDID("$FreeBSD$");
 #include <x86/iommu/busdma_dmar.h>
 #endif
 
-#define IFLIB_DIAGNOSTICS 1
-
-
-
 #ifdef IFLIB_DIAGNOSTICS
 #define DPRINTF printf
 #else
