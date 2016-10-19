@@ -3607,6 +3607,10 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 	if (scctx->isc_rss_table_size == 0)
 		scctx->isc_rss_table_size = 64;
 	scctx->isc_rss_table_mask = scctx->isc_rss_table_size-1;
+
+	GROUPTASK_INIT(&ctx->ifc_admin_task, 0, _task_fn_admin, ctx);
+	/* XXX format name */
+	taskqgroup_attach(qgroup_if_config_tqg, &ctx->ifc_admin_task, ctx, -1, "admin");
 	/*
 	** Now setup MSI or MSI/X, should
 	** return us the number of supported
@@ -4359,6 +4363,7 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 		gtask = &ctx->ifc_txqs[qid].ift_task;
 		tqg = qgroup_if_io_tqg;
 		fn = _task_fn_tx;
+		GROUPTASK_INIT(gtask, 0, fn, q);
 		break;
 	case IFLIB_INTR_RX:
 		q = &ctx->ifc_rxqs[qid];
@@ -4366,6 +4371,7 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 		gtask = &ctx->ifc_rxqs[qid].ifr_task;
 		tqg = qgroup_if_io_tqg;
 		fn = _task_fn_rx;
+		GROUPTASK_INIT(gtask, 0, fn, q);
 		break;
 	case IFLIB_INTR_ADMIN:
 		q = ctx;
@@ -4378,17 +4384,19 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 	default:
 		panic("unknown net intr type");
 	}
-	GROUPTASK_INIT(gtask, 0, fn, q);
 
 	info->ifi_filter = filter;
 	info->ifi_filter_arg = filter_arg;
 	info->ifi_task = gtask;
 
-	/* XXX query cpu that rid belongs to */
-
 	err = _iflib_irq_alloc(ctx, irq, rid, iflib_fast_intr, NULL, info,  name);
-	if (err != 0)
+	if (err != 0) {
+		device_printf(ctx->ifc_dev, "_iflib_irq_alloc failed %d\n", err);
 		return (err);
+	}
+	if (type == IFLIB_INTR_ADMIN)
+		return (0);
+
 	DPRINTF("%s name=%s rid=%d\n", __FUNCTION__, name, tqrid);
 	if (tqrid != -1) {
 		cpuid = find_nth(ctx, &cpus, qid);
@@ -4420,13 +4428,6 @@ iflib_softirq_alloc_generic(if_ctx_t ctx, int rid, iflib_intr_type_t type,  void
 		gtask = &ctx->ifc_rxqs[qid].ifr_task;
 		tqg = qgroup_if_io_tqg;
 		fn = _task_fn_rx;
-		break;
-	case IFLIB_INTR_ADMIN:
-		q = ctx;
-		gtask = &ctx->ifc_admin_task;
-		tqg = qgroup_if_config_tqg;
-		rid = -1;
-		fn = _task_fn_admin;
 		break;
 	case IFLIB_INTR_IOV:
 		q = ctx;
