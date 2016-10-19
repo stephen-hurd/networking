@@ -859,8 +859,6 @@ _taskqgroup_adjust(struct taskqgroup *qgroup, int cnt, int stride)
 	}
 	mtx_unlock(&qgroup->tqg_lock);
 
-	mtx_unlock(&qgroup->tqg_lock);
-
 	while ((gtask = LIST_FIRST(&gtask_head))) {
 		LIST_REMOVE(gtask, gt_list);
 		if (gtask->gt_cpu == -1)
