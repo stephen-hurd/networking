@@ -4392,12 +4392,10 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 	DPRINTF("%s name=%s rid=%d\n", __FUNCTION__, name, tqrid);
 	if (tqrid != -1) {
 		cpuid = find_nth(ctx, &cpus, qid);
-		DPRINTF("%s find_nth(qid=%d) => cpuid=%d\n", __FUNCTION__, qid, cpuid);
 		taskqgroup_attach_cpu(tqg, gtask, q, cpuid, irq->ii_rid, name);
 	} else {
 		taskqgroup_attach(tqg, gtask, q, tqrid, name);
 	}
-	DPRINTF("%s attached to gtask->gt_cpu=%d q=%p\n", __FUNCTION__, gtask->gt_cpu, q);
 
 	return (0);
 }
