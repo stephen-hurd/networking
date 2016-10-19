@@ -788,6 +788,9 @@ taskqgroup_bind(struct taskqgroup *qgroup)
 	 * Bind taskqueue threads to specific CPUs, if they have been assigned
 	 * one.
 	 */
+	if (qgroup->tqg_cnt == 1)
+		return;
+
 	for (i = 0; i < qgroup->tqg_cnt; i++) {
 		gtask = malloc(sizeof (*gtask), M_DEVBUF, M_WAITOK);
 		GTASK_INIT(&gtask->bt_task, 0, 0, taskqgroup_binder, gtask);
