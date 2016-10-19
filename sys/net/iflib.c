@@ -4369,6 +4369,7 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 		break;
 	case IFLIB_INTR_ADMIN:
 		q = ctx;
+		tqrid = -1;
 		info = &ctx->ifc_filter_info;
 		gtask = &ctx->ifc_admin_task;
 		tqg = qgroup_if_config_tqg;
