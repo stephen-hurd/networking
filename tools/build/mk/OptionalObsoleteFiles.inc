@@ -6810,29 +6810,6 @@ OLD_FILES+=usr/share/man/man8/rshd.8.gz
 OLD_FILES+=usr/share/man/man8/rwhod.8.gz
 .endif
 
-.if ${MK_RCS} == no
-OLD_FILES+=usr/bin/ci
-OLD_FILES+=usr/bin/co
-OLD_FILES+=usr/bin/merge
-OLD_FILES+=usr/bin/rcs
-OLD_FILES+=usr/bin/rcsclean
-OLD_FILES+=usr/bin/rcsdiff
-OLD_FILES+=usr/bin/rcsfreeze
-OLD_FILES+=usr/bin/rcsmerge
-OLD_FILES+=usr/bin/rlog
-OLD_FILES+=usr/share/man/man1/ci.1.gz
-OLD_FILES+=usr/share/man/man1/co.1.gz
-OLD_FILES+=usr/share/man/man1/merge.1.gz
-OLD_FILES+=usr/share/man/man1/rcs.1.gz
-OLD_FILES+=usr/share/man/man1/rcsclean.1.gz
-OLD_FILES+=usr/share/man/man1/rcsdiff.1.gz
-OLD_FILES+=usr/share/man/man1/rcsfreeze.1.gz
-OLD_FILES+=usr/share/man/man1/rcsintro.1.gz
-OLD_FILES+=usr/share/man/man1/rcsmerge.1.gz
-OLD_FILES+=usr/share/man/man1/rlog.1.gz
-OLD_FILES+=usr/share/man/man5/rcsfile.5.gz
-.endif
-
 #.if ${MK_RESCUE} == no
 # to be filled in or replaced with a special target
 #.endif
@@ -8623,6 +8600,7 @@ OLD_FILES+=usr/share/man/man4/otus.4.gz
 OLD_FILES+=usr/share/man/man4/otusfw.4.gz
 OLD_FILES+=usr/share/man/man4/rsu.4.gz
 OLD_FILES+=usr/share/man/man4/rsufw.4.gz
+OLD_FILES+=usr/share/man/man4/rtwn_usb.4.gz
 OLD_FILES+=usr/share/man/man4/u3g.4.gz
 OLD_FILES+=usr/share/man/man4/u3gstub.4.gz
 OLD_FILES+=usr/share/man/man4/uark.4.gz
@@ -8664,8 +8642,6 @@ OLD_FILES+=usr/share/man/man4/ural.4.gz
 OLD_FILES+=usr/share/man/man4/urio.4.gz
 OLD_FILES+=usr/share/man/man4/urndis.4.gz
 OLD_FILES+=usr/share/man/man4/urtw.4.gz
-OLD_FILES+=usr/share/man/man4/urtwn.4.gz
-OLD_FILES+=usr/share/man/man4/urtwnfw.4.gz
 OLD_FILES+=usr/share/man/man4/usb.4.gz
 OLD_FILES+=usr/share/man/man4/usb_quirk.4.gz
 OLD_FILES+=usr/share/man/man4/usb_template.4.gz
