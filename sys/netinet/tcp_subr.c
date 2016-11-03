@@ -64,6 +64,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/socketvar.h>
 #include <sys/protosw.h>
 #include <sys/random.h>
+#include <sys/sbuf.h>
 
 #include <vm/uma.h>
 
@@ -245,6 +246,13 @@ VNET_DEFINE(uma_zone_t, sack_hole_zone);
 #ifdef TCP_HHOOK
 VNET_DEFINE(struct hhook_head *, tcp_hhh[HHOOK_TCP_LAST+1]);
 #endif
+
+#define TS_DUMPING 0x1
+#define TS_SAMPLES_PER_SEC 256
+
+static void tcpcb_stats_init(struct tcpcb *tp, int size);
+static void _tcpcb_stats_update(struct tcpcb *tp, int curticks);
+
 
 static struct inpcb *tcp_notify(struct inpcb *, int);
 static struct inpcb *tcp_mtudisc_notify(struct inpcb *, int);
@@ -1193,6 +1201,7 @@ tcp_newtcpcb(struct inpcb *inp)
 	if (tm == NULL)
 		return (NULL);
 	tp = &tm->tcb;
+	tcpcb_stats_init(tp, TS_SAMPLES_PER_SEC);
 
 	/* Initialise cc_var struct for this tcpcb. */
 	tp->ccv = &tm->ccv;
@@ -3110,4 +3119,223 @@ tcp_state_change(struct tcpcb *tp, int newstate)
 	TCPSTATES_INC(newstate);
 	tp->t_state = newstate;
 	TCP_PROBE6(state__change, NULL, tp, NULL, tp, NULL, pstate);
+}
+
+struct tcpcb_stats_sample {
+	uint32_t tss_sbt;
+	uint32_t tss_rto_next;
+	uint32_t tss_srtt;
+	uint32_t tss_rttvar;
+	uint32_t tss_snd_una;
+	uint32_t tss_snd_nxt;
+	uint32_t tss_snd_cwnd;
+	uint32_t tss_rttupdated;
+	uint32_t tss_rexmttimeouts;
+	uint32_t tss_bytes_acked;
+	uint32_t tss_totdupacks;
+	uint32_t tss_sndrexmitpack;
+	uint32_t tss_snd_space;
+} __aligned(CACHE_LINE_SIZE);
+
+struct tcpcb_stats_sample_header {
+	uint32_t tssh_count;
+	uint32_t tssh_ip_laddr;
+	uint32_t tssh_ip_faddr;
+	uint32_t tssh_tcp_lport;
+	uint32_t tssh_tcp_fport;
+} __aligned(CACHE_LINE_SIZE);
+
+/*
+ * Please try to keep names in sync with the sample structure
+ *
+ */
+char * tcpcb_stats_sample_names[] =
+{
+	"sbintime32_t tss_sbt",
+	"sbintime32_t tss_rto_next",
+	"sbintime32_t tss_srtt",
+	"sbintime32_t tss_rttvar",
+	"uint32_t tss_snd_una",
+	"uint32_t tss_snd_nxt",
+	"uint32_t tss_snd_cwnd",
+	"uint32_t tss_rttupdated",
+	"uint32_t tss_rexmttimeouts",
+	"uint32_t tss_bytes_acked",
+	"uint32_t tss_totdupacks",
+	"uint32_t tss_sndrexmitpack",
+	"uint32_t tss_snd_space",
+	NULL
+};
+
+char * tcpcb_stats_sample_header_names[] =
+{
+	"uint32_t tssh_count",
+	"uint32_t tssh_ip_src",
+	"uint32_t tssh_ip_dst",
+	"uint32_t tssh_tcp_lport",
+	"uint32_t tssh_tcp_fport",
+	NULL
+};
+
+static void
+tcpcb_stats_init(struct tcpcb *tp, int size)
+{
+	void *ptr;
+
+	if ((ptr = malloc(size*sizeof(struct tcpcb_stats_sample), M_TCPLOG, M_NOWAIT)) == NULL)
+		return;
+	tp->t_stats.ts_size = size;
+	tp->t_stats.ts_samples = ptr;
+	tp->t_stats_gap = hz/size + 1;
+	_tcpcb_stats_update(tp, ticks);
+}
+
+static struct tcpcb_stats_sample *
+tcp_stats_next(struct tcpcb *tp)
+{
+	struct tcpcb_stats *ts;
+	struct tcpcb_stats_sample *tss;
+
+	ts = &tp->t_stats;
+	if (ts->ts_samples == NULL)
+		return (NULL);
+	tss = &ts->ts_samples[ts->ts_index];
+	++ts->ts_count;
+	if (++ts->ts_index == ts->ts_size)
+		ts->ts_index = 0;
+	return (tss);
+}
+
+static void
+_tcpcb_stats_update(struct tcpcb *tp, int curticks)
+{
+	struct tcpcb_stats_sample *ts;
+	uint32_t srtt, rttvar;
+	sbintime_t now;
+	uint32_t off, win;
+
+	ts = tcp_stats_next(tp);
+	if (ts == NULL)
+		return;
+#ifdef notyet
+	now = tcp_ts_getsbintime();
+#else
+	now = curticks;
+#endif
+	tp->t_lastsample = curticks;
+	srtt = (uint32_t)(tp->t_srtt >> 8);
+	rttvar = (uint32_t)(tp->t_rttvar >> 8);
+
+	ts->tss_sbt = now >> 8;
+	ts->tss_rto_next = (uint32_t)((tp->t_rxtcur - now) >> 8);
+	ts->tss_srtt = srtt;
+	ts->tss_rttvar = rttvar;
+	ts->tss_snd_una = tp->snd_una;
+	ts->tss_snd_nxt = tp->snd_nxt;
+	ts->tss_snd_cwnd = tp->snd_cwnd;
+	ts->tss_rttupdated = (uint32_t)tp->t_rttupdated;
+	ts->tss_rexmttimeouts = (uint32_t)tp->snd_rexmttimeouts;
+	ts->tss_bytes_acked = tp->t_bytes_acked;
+	ts->tss_totdupacks = tp->t_totdupacks;
+	ts->tss_sndrexmitpack = tp->t_sndrexmitpack;
+	/* track peer window */
+	tp->t_totdupacks = 0;
+
+	off = tp->snd_nxt - tp->snd_una;
+	win = min(tp->snd_wnd, tp->snd_cwnd);
+	ts->tss_snd_space = win - off;
+}
+
+void
+tcpcb_stats_update(struct tcpcb *tp)
+{
+	int curticks = ticks;
+
+	if (__predict_true(curticks - tp->t_lastsample < tp->t_stats_gap))
+		return;
+	if (tp->t_stats.ts_flags & TS_DUMPING)
+		return;
+
+	_tcpcb_stats_update(tp, curticks);
+}
+
+int
+tcpcb_stats_format(struct sysctl_req *req)
+{
+	struct sbuf sb;
+	int error;
+	char **p;
+
+	sbuf_new_for_sysctl(&sb, NULL, 128, req);
+	sbuf_printf(&sb, "tcpcb_sample_size: %lu\n", sizeof(struct tcpcb_stats_sample));
+	sbuf_printf(&sb, "tcpcb_sample_header_size: %lu\n", sizeof(struct tcpcb_stats_sample_header));
+	sbuf_printf(&sb, "(tcpcb_stats_sample_header\n");
+	p = &tcpcb_stats_sample_header_names[0];
+	while (*p != NULL) {
+		sbuf_printf(&sb, "\t(%s)", *p);
+		p++;
+
+	}
+	sbuf_printf(&sb, ")");
+	sbuf_printf(&sb, "(tcpcb_stats_sample\n");
+	p = &tcpcb_stats_sample_names[0];
+	while (*p != NULL) {
+		sbuf_printf(&sb, "\t(%s)", *p);
+		p++;
+	}
+	sbuf_printf(&sb, ")");
+	error = sbuf_finish(&sb);
+	sbuf_delete(&sb);
+	return (error);
+}
+
+int
+tcpcb_stats_dump(struct sysctl_req *req, struct inpcb *inp)
+{
+	struct tcpcb_stats *ts;
+	struct tcpcb_stats_sample *tss;
+	struct tcpcb_stats_sample_header tssh;
+	struct tcpcb *tp;
+	struct sbuf sb;
+	int i, next, entries, error;
+
+	tp = inp->inp_ppcb;
+	ts = &tp->t_stats;
+	if (ts->ts_samples == NULL)
+		return (ENOMEM);
+	bzero(&tssh, sizeof(struct tcpcb_stats_sample_header));
+	INP_WLOCK(inp);
+	ts->ts_flags |= TS_DUMPING;
+	INP_WUNLOCK(inp);
+	sbuf_new_for_sysctl(&sb, NULL, PAGE_SIZE, req);
+
+	entries = min(ts->ts_size, ts->ts_count);
+	tssh.tssh_count = entries;
+	tssh.tssh_ip_laddr = inp->inp_inc.inc_ie.ie_laddr.s_addr;
+	tssh.tssh_ip_faddr = inp->inp_inc.inc_ie.ie_faddr.s_addr;
+	tssh.tssh_tcp_lport = inp->inp_inc.inc_ie.ie_lport;
+	tssh.tssh_tcp_fport = inp->inp_inc.inc_ie.ie_fport;
+	sbuf_bcat(&sb, &tssh, sizeof(struct tcpcb_stats_sample_header));
+	next = 0;
+	if (ts->ts_count > ts->ts_size) {
+		next = ts->ts_index + 1;
+		if (next == ts->ts_size)
+			next = 0;
+	}
+
+	for (i = 0; i < entries; i++) {
+		tss = &ts->ts_samples[next];
+		sbuf_bcat(&sb, tss, sizeof(*tss));
+		if (++next == ts->ts_size)
+			next = 0;
+	}
+	INP_WLOCK(inp);
+	ts->ts_count = 0;
+	ts->ts_index = 0;
+	ts->ts_flags &= ~TS_DUMPING;
+	INP_WUNLOCK(inp);
+
+	error = sbuf_finish(&sb);
+	sbuf_delete(&sb);
+	return (error);
 }

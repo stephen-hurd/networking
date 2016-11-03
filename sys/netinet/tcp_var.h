@@ -160,6 +160,17 @@ struct tcp_function {
 
 TAILQ_HEAD(tcp_funchead, tcp_function);
 
+struct sockopt;
+struct tcpcb_stats_sample;
+
+struct tcpcb_stats {
+	struct tcpcb_stats_sample *ts_samples;
+	uint16_t ts_size;
+	uint16_t ts_count;
+	uint16_t ts_index;
+	uint16_t ts_flags;
+};
+
 /*
  * Tcp control block, one per tcp; fields:
  * Organized for 16 byte cacheline efficiency.
@@ -168,7 +179,8 @@ struct tcpcb {
 	struct	tsegqe_head t_segq;	/* segment reassembly queue */
 	void	*t_pspare[2];		/* new reassembly queue */
 	int	t_segqlen;		/* segment reassembly queue length */
-	int	t_dupacks;		/* consecutive dup acks recd */
+	uint16_t t_dupacks;		/* consecutive dup acks recd */
+	uint16_t t_totdupacks;		/* total dup acks recd */
 
 	struct tcp_timer *t_timers;	/* All the TCP timers in one struct */
 
@@ -197,12 +209,13 @@ struct tcpcb {
 
 	uint32_t  snd_wnd;		/* send window */
 	uint32_t  snd_cwnd;		/* congestion-controlled window */
-	u_long	snd_spare1;		/* unused */
+	u_long	snd_rexmttimeouts;	/* total rexmt timeouts so far */
 	uint32_t  snd_ssthresh;		/* snd_cwnd size threshold for
 					 * for slow start exponential to
 					 * linear switch
 					 */
-	u_long	snd_spare2;		/* unused */
+	u_int	snd_spare2;		/* unused */
+	uint32_t snd_rexmitpack;	/* retransmit packets sent */
 	tcp_seq	snd_recover;		/* for use in NewReno Fast Recovery */
 
 	u_int	t_rcvtime;		/* inactivity time */
@@ -210,8 +223,8 @@ struct tcpcb {
 	u_int	t_rtttime;		/* RTT measurement start time */
 	tcp_seq	t_rtseq;		/* sequence number being timed */
 
-	u_int	t_bw_spare1;		/* unused */
-	tcp_seq	t_bw_spare2;		/* unused */
+	int	t_lastsample;		/* ticks at last stats sampling */
+	int	t_stats_gap;		/* minimum gap between samples */
 
 	int	t_rxtcur;		/* current retransmit value (ticks) */
 	u_int	t_maxseg;		/* maximum segment size */
@@ -299,7 +312,10 @@ struct tcpcb {
 	uint64_t _pad[2];		/* 2 are available */
 #endif /* _LP64 */
 #else
-	uint64_t _pad[6];
+	struct tcpcb_stats t_stats;
+	uint64_t _pad[4];
+
+
 #endif /* defined(_KERNEL) && defined(TCPPCAP) */
 };
 
@@ -879,6 +895,11 @@ void	 tcp_free_sackholes(struct tcpcb *tp);
 int	 tcp_newreno(struct tcpcb *, struct tcphdr *);
 int	 tcp_compute_pipe(struct tcpcb *);
 
+struct sysctl_req;
+void   tcpcb_stats_update(struct tcpcb *tp);
+int    tcpcb_stats_dump(struct sysctl_req *req, struct inpcb *inp);
+int    tcpcb_stats_format(struct sysctl_req *req);
+ 
 static inline void
 tcp_fields_to_host(struct tcphdr *th)
 {
