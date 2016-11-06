@@ -251,6 +251,7 @@ VNET_DEFINE(struct hhook_head *, tcp_hhh[HHOOK_TCP_LAST+1]);
 #define TS_SAMPLES_PER_SEC 256
 
 static void tcpcb_stats_init(struct tcpcb *tp, int size);
+static void tcpcb_stats_deinit(struct tcpcb *tp);
 static void _tcpcb_stats_update(struct tcpcb *tp, int curticks);
 
 
@@ -1197,6 +1198,7 @@ tcp_newtcpcb(struct inpcb *inp)
 	int isipv6 = (inp->inp_vflag & INP_IPV6) != 0;
 #endif /* INET6 */
 
+	inp->inp_ip_p = IPPROTO_TCP;
 	tm = uma_zalloc(V_tcpcb_zone, M_NOWAIT | M_ZERO);
 	if (tm == NULL)
 		return (NULL);
@@ -1224,6 +1226,7 @@ tcp_newtcpcb(struct inpcb *inp)
 			if (tp->t_fb->tfb_tcp_fb_fini)
 				(*tp->t_fb->tfb_tcp_fb_fini)(tp, 1);
 			refcount_release(&tp->t_fb->tfb_refcnt);
+			tcpcb_stats_deinit(tp);
 			uma_zfree(V_tcpcb_zone, tm);
 			return (NULL);
 		}
@@ -1234,6 +1237,7 @@ tcp_newtcpcb(struct inpcb *inp)
 		if (tp->t_fb->tfb_tcp_fb_fini)
 			(*tp->t_fb->tfb_tcp_fb_fini)(tp, 1);
 		refcount_release(&tp->t_fb->tfb_refcnt);
+		tcpcb_stats_deinit(tp);
 		uma_zfree(V_tcpcb_zone, tm);
 		return (NULL);
 	}
@@ -1515,6 +1519,7 @@ tcp_discardcb(struct tcpcb *tp)
 			(*tp->t_fb->tfb_tcp_fb_fini)(tp, 1);
 		refcount_release(&tp->t_fb->tfb_refcnt);
 		tp->t_inpcb = NULL;
+		tcpcb_stats_deinit(tp);
 		uma_zfree(V_tcpcb_zone, tp);
 		released = in_pcbrele_wlocked(inp);
 		KASSERT(!released, ("%s: inp %p should not have been released "
@@ -1544,6 +1549,7 @@ tcp_timer_discard(void *ptp)
 			(*tp->t_fb->tfb_tcp_fb_fini)(tp, 1);
 		refcount_release(&tp->t_fb->tfb_refcnt);
 		tp->t_inpcb = NULL;
+		tcpcb_stats_deinit(tp);
 		uma_zfree(V_tcpcb_zone, tp);
 		if (in_pcbrele_wlocked(inp)) {
 			INP_INFO_RUNLOCK(&V_tcbinfo);
@@ -3182,12 +3188,23 @@ tcpcb_stats_init(struct tcpcb *tp, int size)
 {
 	void *ptr;
 
-	if ((ptr = malloc(size*sizeof(struct tcpcb_stats_sample), M_TCPLOG, M_NOWAIT)) == NULL)
+	bzero(&tp->t_stats, sizeof(struct tcpcb_stats));
+	if ((ptr = malloc(size*sizeof(struct tcpcb_stats_sample), M_TCPLOG, M_NOWAIT)) == NULL) {
+		printf("failed to allocated stats sample buffer for new connection\n");
 		return;
+	}
 	tp->t_stats.ts_size = size;
 	tp->t_stats.ts_samples = ptr;
 	tp->t_stats_gap = hz/size + 1;
 	_tcpcb_stats_update(tp, ticks);
+}
+
+static void
+tcpcb_stats_deinit(struct tcpcb *tp)
+{
+
+	free(tp->t_stats.ts_samples, M_TCPLOG);
+	bzero(&tp->t_stats, sizeof(struct tcpcb_stats));
 }
 
 static struct tcpcb_stats_sample *
@@ -3246,6 +3263,8 @@ _tcpcb_stats_update(struct tcpcb *tp, int curticks)
 	ts->tss_snd_space = win - off;
 }
 
+static int tcp_total_samples;
+
 void
 tcpcb_stats_update(struct tcpcb *tp)
 {
@@ -3253,9 +3272,7 @@ tcpcb_stats_update(struct tcpcb *tp)
 
 	if (__predict_true(curticks - tp->t_lastsample < tp->t_stats_gap))
 		return;
-	if (tp->t_stats.ts_flags & TS_DUMPING)
-		return;
-
+	atomic_add_int(&tcp_total_samples, 1);
 	_tcpcb_stats_update(tp, curticks);
 }
 
@@ -3267,6 +3284,7 @@ tcpcb_stats_format(struct sysctl_req *req)
 	char **p;
 
 	sbuf_new_for_sysctl(&sb, NULL, 128, req);
+	sbuf_printf(&sb, "\n");
 	sbuf_printf(&sb, "tcpcb_sample_size: %lu\n", sizeof(struct tcpcb_stats_sample));
 	sbuf_printf(&sb, "tcpcb_sample_header_size: %lu\n", sizeof(struct tcpcb_stats_sample_header));
 	sbuf_printf(&sb, "(tcpcb_stats_sample_header\n");
@@ -3276,7 +3294,7 @@ tcpcb_stats_format(struct sysctl_req *req)
 		p++;
 
 	}
-	sbuf_printf(&sb, ")");
+	sbuf_printf(&sb, ")\n");
 	sbuf_printf(&sb, "(tcpcb_stats_sample\n");
 	p = &tcpcb_stats_sample_names[0];
 	while (*p != NULL) {
@@ -3291,27 +3309,29 @@ tcpcb_stats_format(struct sysctl_req *req)
 }
 
 void
-tcpcb_stats_dump(struct inpcb *inp, void *req_arg)
+tcpcb_stats_dump(struct inpcb *inp, void *sb_arg)
 {
 	struct tcpcb_stats *ts;
 	struct tcpcb_stats_sample *tss;
 	struct tcpcb_stats_sample_header tssh;
 	struct tcpcb *tp;
-	struct sbuf sb;
-	struct sysctl_req *req = req_arg;
-	int i, next, entries, error;
+	struct sbuf *sb = sb_arg;
+	int next, entries, count1, count2;
 
 	/* hold buffers */
 	if (inp->inp_ip_p != IPPROTO_TCP)
 		return;
-	req = req_arg;
 	tp = inp->inp_ppcb;
+	if (tp->t_inpcb != inp)
+		return;
 	ts = &tp->t_stats;
 	if (ts->ts_samples == NULL)
 		return;
+	if (ts->ts_count == 0)
+		return;
+
+	printf("%p has %d samples  ", tp, ts->ts_count);
 	bzero(&tssh, sizeof(struct tcpcb_stats_sample_header));
-	ts->ts_flags |= TS_DUMPING;
-	sbuf_new_for_sysctl(&sb, NULL, PAGE_SIZE, req);
 
 	entries = min(ts->ts_size, ts->ts_count);
 	tssh.tssh_count = entries;
@@ -3319,33 +3339,83 @@ tcpcb_stats_dump(struct inpcb *inp, void *req_arg)
 	tssh.tssh_ip_faddr = inp->inp_inc.inc_ie.ie_faddr.s_addr;
 	tssh.tssh_tcp_lport = inp->inp_inc.inc_ie.ie_lport;
 	tssh.tssh_tcp_fport = inp->inp_inc.inc_ie.ie_fport;
-	sbuf_bcat(&sb, &tssh, sizeof(struct tcpcb_stats_sample_header));
+	sbuf_bcat(sb, &tssh, sizeof(struct tcpcb_stats_sample_header));
+
 	next = 0;
 	if (ts->ts_count > ts->ts_size) {
 		next = ts->ts_index + 1;
 		if (next == ts->ts_size)
 			next = 0;
 	}
+	count1 = min(ts->ts_size - next, ts->ts_count);
+	count2 = 0;
+	if (ts->ts_index && count1 < min(ts->ts_count, ts->ts_size))
+		count2 = min(ts->ts_count, ts->ts_size) - count1;
 
-	for (i = 0; i < entries; i++) {
-		tss = &ts->ts_samples[next];
-		sbuf_bcat(&sb, tss, sizeof(*tss));
-		if (++next == ts->ts_size)
-			next = 0;
-	}
+	tss = &ts->ts_samples[next];
+	sbuf_bcat(sb, tss, sizeof(*tss)*count1);
+	if (count2)
+		sbuf_bcat(sb, ts->ts_samples, sizeof(*tss)*count2);
+	printf("dumped %d samples\n", count1 + count2);
+
 	ts->ts_count = 0;
 	ts->ts_index = 0;
-	ts->ts_flags &= ~TS_DUMPING;
+}
 
-	error = sbuf_finish(&sb);
-	sbuf_delete(&sb);
+static void
+tcpcb_stats_reset(struct inpcb *inp, void *arg __unused)
+{
+	struct tcpcb_stats *ts;
+	struct tcpcb *tp;
+
+	/* hold buffers */
+	if (inp->inp_ip_p != IPPROTO_TCP)
+		return;
+	tp = inp->inp_ppcb;
+	if (tp->t_inpcb != inp)
+		return;
+	ts = &tp->t_stats;
+	if (ts->ts_samples == NULL)
+		return;
+	if (ts->ts_count == 0)
+		return;
+	ts->ts_count = 0;
+	ts->ts_index = 0;
 }
 
 static int
 sysctl_conn_stats(SYSCTL_HANDLER_ARGS)
 {
+	struct sbuf sb;
+	int error;
 
-	inp_apply_all(tcpcb_stats_dump, req);
+	sbuf_new_for_sysctl(&sb, NULL, PAGE_SIZE, req);
+	sysctl_wire_old_buffer(req , 0);
+	sbuf_clear_flags(&sb, SBUF_INCLUDENUL);
+
+	inp_apply_all(tcpcb_stats_dump, &sb);
+	error = sbuf_finish(&sb);
+	if (error)
+		printf("sbuf_finish saw %d\n", error);
+	sbuf_delete(&sb);
+	return (error);
+}
+
+static int
+sysctl_conn_stats_reset(SYSCTL_HANDLER_ARGS)
+{
+	int v, error;
+
+	v = 0;
+	error = sysctl_handle_int(oidp, &v, 0, req);
+	if (error)
+		return (error);
+	if (req->newptr == NULL)
+		return (0);
+	if (v == 0)
+		return (0);
+
+	inp_apply_all(tcpcb_stats_reset, NULL);
 	return (0);
 }
 
@@ -3356,13 +3426,21 @@ sysctl_conn_stats_format(SYSCTL_HANDLER_ARGS)
 	return (tcpcb_stats_format(req));
 }
 
-SYSCTL_PROC(_net_inet_tcp, OID_AUTO, conn_stats_format,
+static SYSCTL_NODE(_net_inet_tcp, OID_AUTO, prof, CTLFLAG_RD, NULL,
+    "tcp profiling");
+
+SYSCTL_PROC(_net_inet_tcp_prof, OID_AUTO, conn_stats_format,
     CTLFLAG_MPSAFE | CTLTYPE_STRING | CTLFLAG_RD, NULL, 0,
     sysctl_conn_stats_format, "A",
     "format for sampled tcp state for all connections");
 
-
-SYSCTL_PROC(_net_inet_tcp, OID_AUTO, conn_stats,
+SYSCTL_PROC(_net_inet_tcp_prof, OID_AUTO, conn_stats,
     CTLFLAG_MPSAFE | CTLTYPE_OPAQUE | CTLFLAG_RD, NULL, 0,
     sysctl_conn_stats, "",
     "sampled tcp state for all connections");
+
+SYSCTL_PROC(_net_inet_tcp_prof, OID_AUTO, reset, CTLTYPE_INT | CTLFLAG_RW,
+    NULL, 0, sysctl_conn_stats_reset, "I", "reset tcp lock profiling statistics");
+
+SYSCTL_INT(_net_inet_tcp_prof, OID_AUTO, samples, CTLFLAG_RD,
+    &tcp_total_samples, 0, "total tcp samples");
