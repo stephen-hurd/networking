@@ -3272,7 +3272,7 @@ tcpcb_stats_format(struct sysctl_req *req)
 	sbuf_printf(&sb, "(tcpcb_stats_sample_header\n");
 	p = &tcpcb_stats_sample_header_names[0];
 	while (*p != NULL) {
-		sbuf_printf(&sb, "\t(%s)", *p);
+		sbuf_printf(&sb, "\t(%s)\n", *p);
 		p++;
 
 	}
@@ -3280,33 +3280,37 @@ tcpcb_stats_format(struct sysctl_req *req)
 	sbuf_printf(&sb, "(tcpcb_stats_sample\n");
 	p = &tcpcb_stats_sample_names[0];
 	while (*p != NULL) {
-		sbuf_printf(&sb, "\t(%s)", *p);
+		sbuf_printf(&sb, "\t(%s)\n", *p);
 		p++;
 	}
 	sbuf_printf(&sb, ")");
 	error = sbuf_finish(&sb);
 	sbuf_delete(&sb);
+
 	return (error);
 }
 
-int
-tcpcb_stats_dump(struct sysctl_req *req, struct inpcb *inp)
+void
+tcpcb_stats_dump(struct inpcb *inp, void *req_arg)
 {
 	struct tcpcb_stats *ts;
 	struct tcpcb_stats_sample *tss;
 	struct tcpcb_stats_sample_header tssh;
 	struct tcpcb *tp;
 	struct sbuf sb;
+	struct sysctl_req *req = req_arg;
 	int i, next, entries, error;
 
+	/* hold buffers */
+	if (inp->inp_ip_p != IPPROTO_TCP)
+		return;
+	req = req_arg;
 	tp = inp->inp_ppcb;
 	ts = &tp->t_stats;
 	if (ts->ts_samples == NULL)
-		return (ENOMEM);
+		return;
 	bzero(&tssh, sizeof(struct tcpcb_stats_sample_header));
-	INP_WLOCK(inp);
 	ts->ts_flags |= TS_DUMPING;
-	INP_WUNLOCK(inp);
 	sbuf_new_for_sysctl(&sb, NULL, PAGE_SIZE, req);
 
 	entries = min(ts->ts_size, ts->ts_count);
@@ -3329,13 +3333,36 @@ tcpcb_stats_dump(struct sysctl_req *req, struct inpcb *inp)
 		if (++next == ts->ts_size)
 			next = 0;
 	}
-	INP_WLOCK(inp);
 	ts->ts_count = 0;
 	ts->ts_index = 0;
 	ts->ts_flags &= ~TS_DUMPING;
-	INP_WUNLOCK(inp);
 
 	error = sbuf_finish(&sb);
 	sbuf_delete(&sb);
-	return (error);
 }
+
+static int
+sysctl_conn_stats(SYSCTL_HANDLER_ARGS)
+{
+
+	inp_apply_all(tcpcb_stats_dump, req);
+	return (0);
+}
+
+static int
+sysctl_conn_stats_format(SYSCTL_HANDLER_ARGS)
+{
+
+	return (tcpcb_stats_format(req));
+}
+
+SYSCTL_PROC(_net_inet_tcp, OID_AUTO, conn_stats_format,
+    CTLFLAG_MPSAFE | CTLTYPE_STRING | CTLFLAG_RD, NULL, 0,
+    sysctl_conn_stats_format, "A",
+    "format for sampled tcp state for all connections");
+
+
+SYSCTL_PROC(_net_inet_tcp, OID_AUTO, conn_stats,
+    CTLFLAG_MPSAFE | CTLTYPE_OPAQUE | CTLFLAG_RD, NULL, 0,
+    sysctl_conn_stats, "",
+    "sampled tcp state for all connections");

@@ -897,7 +897,7 @@ int	 tcp_compute_pipe(struct tcpcb *);
 
 struct sysctl_req;
 void   tcpcb_stats_update(struct tcpcb *tp);
-int    tcpcb_stats_dump(struct sysctl_req *req, struct inpcb *inp);
+void  tcpcb_stats_dump(struct inpcb *inp, void *req);
 int    tcpcb_stats_format(struct sysctl_req *req);
  
 static inline void
