@@ -330,6 +330,7 @@ cc_ack_received(struct tcpcb *tp, struct tcphdr *th, uint16_t nsegs,
 		}
 	}
 
+	tcpcb_stats_update(tp);
 	if (CC_ALGO(tp)->ack_received != NULL) {
 		/* XXXLAS: Find a way to live without this */
 		tp->ccv->curack = th->th_ack;
