@@ -3189,7 +3189,7 @@ tcpcb_stats_init(struct tcpcb *tp, int size)
 	void *ptr;
 
 	bzero(&tp->t_stats, sizeof(struct tcpcb_stats));
-	if ((ptr = malloc(size*sizeof(struct tcpcb_stats_sample), M_TCPLOG, M_NOWAIT)) == NULL) {
+	if ((ptr = malloc(size*sizeof(struct tcpcb_stats_sample), M_TCPLOG, M_NOWAIT|M_ZERO)) == NULL) {
 		printf("failed to allocated stats sample buffer for new connection\n");
 		return;
 	}
@@ -3308,6 +3308,12 @@ tcpcb_stats_format(struct sysctl_req *req)
 	return (error);
 }
 
+#ifdef TCPSTATS_DEBUG
+#define TDPRINTF printf
+#else
+#define TDPRINTF(...)
+#endif
+
 void
 tcpcb_stats_dump(struct inpcb *inp, void *sb_arg)
 {
@@ -3330,7 +3336,7 @@ tcpcb_stats_dump(struct inpcb *inp, void *sb_arg)
 	if (ts->ts_count == 0)
 		return;
 
-	printf("%p has %d samples  ", tp, ts->ts_count);
+	TDPRINTF("%p has %d samples  ", tp, ts->ts_count);
 	bzero(&tssh, sizeof(struct tcpcb_stats_sample_header));
 
 	entries = min(ts->ts_size, ts->ts_count);
@@ -3356,10 +3362,8 @@ tcpcb_stats_dump(struct inpcb *inp, void *sb_arg)
 	sbuf_bcat(sb, tss, sizeof(*tss)*count1);
 	if (count2)
 		sbuf_bcat(sb, ts->ts_samples, sizeof(*tss)*count2);
-	printf("dumped %d samples\n", count1 + count2);
-
-	ts->ts_count = 0;
-	ts->ts_index = 0;
+	TDPRINTF("dumped %d samples %zu bytes size %zu len %zu \n",
+	       count1 + count2, sizeof(struct tcpcb_stats_sample_header) + (count1 + count2)*sizeof(*tss), sb->s_size, sb->s_len);
 }
 
 static void
@@ -3368,7 +3372,6 @@ tcpcb_stats_reset(struct inpcb *inp, void *arg __unused)
 	struct tcpcb_stats *ts;
 	struct tcpcb *tp;
 
-	/* hold buffers */
 	if (inp->inp_ip_p != IPPROTO_TCP)
 		return;
 	tp = inp->inp_ppcb;
@@ -3383,17 +3386,57 @@ tcpcb_stats_reset(struct inpcb *inp, void *arg __unused)
 	ts->ts_index = 0;
 }
 
+static void
+tcpcb_stats_count(struct inpcb *inp, void *arg)
+{
+	int *count = arg;
+	struct tcpcb_stats *ts;
+	struct tcpcb *tp;
+	int next, count1, count2;
+
+	if (inp->inp_ip_p != IPPROTO_TCP)
+		return;
+	tp = inp->inp_ppcb;
+	if (tp->t_inpcb != inp)
+		return;
+	ts = &tp->t_stats;
+	if (ts->ts_samples == NULL)
+		return;
+	if (ts->ts_count == 0)
+		return;
+
+	next = 0;
+	if (ts->ts_count > ts->ts_size) {
+		next = ts->ts_index + 1;
+		if (next == ts->ts_size)
+			next = 0;
+	}
+	count1 = min(ts->ts_size - next, ts->ts_count);
+	count2 = 0;
+	if (ts->ts_index && count1 < min(ts->ts_count, ts->ts_size))
+		count2 = min(ts->ts_count, ts->ts_size) - count1;
+
+	*count += (sizeof(struct tcpcb_stats_sample_header)*(count1 + count2) + sizeof(struct tcpcb_stats_sample_header));
+}
+
 static int
 sysctl_conn_stats(SYSCTL_HANDLER_ARGS)
 {
 	struct sbuf sb;
-	int error;
+	int error, count;
 
-	sbuf_new_for_sysctl(&sb, NULL, PAGE_SIZE, req);
-	sysctl_wire_old_buffer(req , 0);
+	count = 0;
+	inp_apply_all(tcpcb_stats_count, &count);
+	if (count < 512)
+		return (0);
+
+	sbuf_new_for_sysctl(&sb, NULL, count + 2*PAGE_SIZE, req);
+	sysctl_wire_old_buffer(req , count + 2*PAGE_SIZE);
 	sbuf_clear_flags(&sb, SBUF_INCLUDENUL);
+	sbuf_set_flags(&sb, SBUF_AUTOEXTEND);
 
 	inp_apply_all(tcpcb_stats_dump, &sb);
+	TDPRINTF("bcat of size %zu len %zu\n", sb.s_size, sb.s_len);
 	error = sbuf_finish(&sb);
 	if (error)
 		printf("sbuf_finish saw %d\n", error);
