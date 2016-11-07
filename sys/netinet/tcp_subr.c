@@ -3223,6 +3223,7 @@ tcp_stats_next(struct tcpcb *tp)
 	return (tss);
 }
 
+#ifdef RTT_SBINTIME
 static void
 _tcpcb_stats_update(struct tcpcb *tp, int curticks)
 {
@@ -3234,17 +3235,14 @@ _tcpcb_stats_update(struct tcpcb *tp, int curticks)
 	ts = tcp_stats_next(tp);
 	if (ts == NULL)
 		return;
-#ifdef notyet
 	now = tcp_ts_getsbintime();
-#else
-	now = curticks;
-#endif
 	tp->t_lastsample = curticks;
+
 	srtt = (uint32_t)(tp->t_srtt >> 8);
 	rttvar = (uint32_t)(tp->t_rttvar >> 8);
 
-	ts->tss_sbt = now >> 8;
-	ts->tss_rto_next = (uint32_t)((tp->t_rxtcur - now) >> 8);
+	ts->tss_sbt = now;
+	ts->tss_rto_next = (uint32_t)(tp->t_rxtcur >> 8);
 	ts->tss_srtt = srtt;
 	ts->tss_rttvar = rttvar;
 	ts->tss_snd_una = tp->snd_una;
@@ -3263,6 +3261,46 @@ _tcpcb_stats_update(struct tcpcb *tp, int curticks)
 	ts->tss_snd_space = win - off;
 }
 
+#else
+
+static void
+_tcpcb_stats_update(struct tcpcb *tp, int curticks)
+{
+	struct tcpcb_stats_sample *ts;
+	uint32_t srtt, rttvar;
+	sbintime_t now;
+	uint32_t off, win;
+
+	ts = tcp_stats_next(tp);
+	if (ts == NULL)
+		return;
+	now = curticks;
+	tp->t_lastsample = curticks;
+
+	srtt = tp->t_srtt;
+	rttvar = tp->t_rttvar;
+
+	ts->tss_sbt = now;
+	ts->tss_rto_next = tp->t_rxtcur;
+	ts->tss_srtt = srtt;
+	ts->tss_rttvar = rttvar;
+	ts->tss_snd_una = tp->snd_una;
+	ts->tss_snd_nxt = tp->snd_nxt;
+	ts->tss_snd_cwnd = tp->snd_cwnd;
+	ts->tss_rttupdated = (uint32_t)tp->t_rttupdated;
+	ts->tss_rexmttimeouts = (uint32_t)tp->snd_rexmttimeouts;
+	ts->tss_bytes_acked = tp->t_bytes_acked;
+	ts->tss_totdupacks = tp->t_totdupacks;
+	ts->tss_sndrexmitpack = tp->t_sndrexmitpack;
+	/* track peer window */
+	tp->t_totdupacks = 0;
+
+	off = tp->snd_nxt - tp->snd_una;
+	win = min(tp->snd_wnd, tp->snd_cwnd);
+	ts->tss_snd_space = win - off;
+}
+
+#endif
 static int tcp_total_samples;
 
 void
