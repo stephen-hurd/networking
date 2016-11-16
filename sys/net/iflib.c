@@ -1932,7 +1932,7 @@ iflib_stop(if_ctx_t ctx)
 	if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
 
 	IFDI_INTR_DISABLE(ctx);
-	msleep(ctx, &ctx->ifc_mtx, PUSER, "iflib_init", hz);
+	msleep(ctx, &ctx->ifc_mtx, PUSER, "iflib_init", hz/10);
 
 	/* Wait for current tx queue users to exit to disarm watchdog timer. */
 	for (i = 0; i < scctx->isc_ntxqsets; i++, txq++) {
