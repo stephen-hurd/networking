@@ -631,6 +631,7 @@ static int iflib_register(if_ctx_t);
 static void iflib_init_locked(if_ctx_t ctx);
 static void iflib_add_device_sysctl_pre(if_ctx_t ctx);
 static void iflib_add_device_sysctl_post(if_ctx_t ctx);
+static void iflib_ifmp_purge(iflib_txq_t txq);
 
 
 #ifdef DEV_NETMAP
@@ -1933,20 +1934,15 @@ iflib_stop(if_ctx_t ctx)
 	if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
 
 	IFDI_INTR_DISABLE(ctx);
-	if ((ctx->ifc_flags & IFC_NEED_CLEAN) == 0) {
-		IFDI_STOP(ctx);
-		for (i = 0; i < scctx->isc_ntxqsets; i++, txq++)
-			ifmp_ring_reset_stats(txq->ift_br[0]);
-		return;
-	}
-	msleep(ctx, &ctx->ifc_mtx, PUSER, "iflib_init", hz/10);
+	DELAY(100000);
+	IFDI_STOP(ctx);
 
 	/* Wait for current tx queue users to exit to disarm watchdog timer. */
 	for (i = 0; i < scctx->isc_ntxqsets; i++, txq++) {
 		/* make sure all transmitters have completed before proceeding XXX */
 
 		/* clean any enqueued buffers */
-		iflib_txq_check_drain(txq, 0);
+		iflib_ifmp_purge(txq);
 		/* Free any existing tx buffers. */
 		for (j = 0; j < txq->ift_size; j++) {
 			iflib_txsd_free(ctx, txq, j);
@@ -1960,6 +1956,10 @@ iflib_stop(if_ctx_t ctx)
 		for (j = 0, di = txq->ift_ifdi; j < ctx->ifc_nhwtxqs; j++, di++)
 			bzero((void *)di->idi_vaddr, di->idi_size);
 	}
+	if (ctx->ifc_flags & IFC_NEED_CLEAN) {
+		ctx->ifc_flags &= ~IFC_NEED_CLEAN;
+		return;
+	}
 	for (i = 0; i < scctx->isc_nrxqsets; i++, rxq++) {
 		/* make sure all transmitters have completed before proceeding XXX */
 
@@ -1969,8 +1969,6 @@ iflib_stop(if_ctx_t ctx)
 		for (j = 0, fl = rxq->ifr_fl; j < rxq->ifr_nfl; j++, fl++)
 			iflib_fl_bufs_free(fl);
 	}
-	IFDI_STOP(ctx);
-	ctx->ifc_flags &= ~IFC_NEED_CLEAN;
 }
 
 static iflib_rxsd_t
@@ -2957,6 +2955,42 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		if_inc_counter(ifp, IFCOUNTER_OMCASTS, mcast_sent);
 
 	return (consumed);
+}
+
+static uint32_t
+iflib_txq_drain_always(struct ifmp_ring *r)
+{
+	return (1);
+}
+
+static uint32_t
+iflib_txq_drain_free(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
+{
+	int i, avail;
+	struct mbuf **mp;
+
+	avail = IDXDIFF(pidx, cidx, r->size);
+	for (i = 0; i < avail; i++) {
+		mp = _ring_peek_one(r, cidx, i);
+		m_freem(*mp);
+	}
+	iflib_completed_tx_reclaim(r->cookie, r->size);
+	return (avail);
+}
+
+static void
+iflib_ifmp_purge(iflib_txq_t txq)
+{
+	struct ifmp_ring *r;
+
+	r = txq->ift_br[0];
+	r->drain = iflib_txq_drain_free;
+	r->can_drain = iflib_txq_drain_always;
+
+	ifmp_ring_check_drainage(r, 0);
+
+	r->drain = iflib_txq_drain;
+	r->can_drain = iflib_txq_can_drain;
 }
 
 static void
