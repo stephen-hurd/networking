@@ -2968,13 +2968,15 @@ iflib_txq_drain_free(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 {
 	int i, avail;
 	struct mbuf **mp;
+	iflib_txq_t txq;
 
+	txq = r->cookie;
 	avail = IDXDIFF(pidx, cidx, r->size);
 	for (i = 0; i < avail; i++) {
 		mp = _ring_peek_one(r, cidx, i);
 		m_freem(*mp);
 	}
-	iflib_completed_tx_reclaim(r->cookie, r->size);
+	iflib_completed_tx_reclaim(txq, txq->ift_size-1);
 	return (avail);
 }
 
@@ -3132,7 +3134,7 @@ iflib_if_transmit(if_t ifp, struct mbuf *m)
 	if (__predict_false((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0 || !LINK_ACTIVE(ctx))) {
 		DBG_COUNTER_INC(tx_frees);
 		m_freem(m);
-		return (0);
+		return (ENOBUFS);
 	}
 
 	MPASS(m->m_nextpkt == NULL);
