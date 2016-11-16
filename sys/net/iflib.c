@@ -306,6 +306,7 @@ typedef struct iflib_sw_tx_desc_array {
 #define	IFC_MULTISEG		0x04
 #define	IFC_DMAR		0x08
 #define	IFC_SC_ALLOCATED	0x10
+#define	IFC_NEED_CLEAN		0x20
 
 #define CSUM_OFFLOAD		(CSUM_IP_TSO|CSUM_IP6_TSO|CSUM_IP| \
 				 CSUM_IP_UDP|CSUM_IP_TCP|CSUM_IP_SCTP| \
@@ -1932,6 +1933,12 @@ iflib_stop(if_ctx_t ctx)
 	if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
 
 	IFDI_INTR_DISABLE(ctx);
+	if ((ctx->ifc_flags & IFC_NEED_CLEAN) == 0) {
+		IFDI_STOP(ctx);
+		for (i = 0; i < scctx->isc_ntxqsets; i++, txq++)
+			ifmp_ring_reset_stats(txq->ift_br[0]);
+		return;
+	}
 	msleep(ctx, &ctx->ifc_mtx, PUSER, "iflib_init", hz/10);
 
 	/* Wait for current tx queue users to exit to disarm watchdog timer. */
@@ -1963,6 +1970,7 @@ iflib_stop(if_ctx_t ctx)
 			iflib_fl_bufs_free(fl);
 	}
 	IFDI_STOP(ctx);
+	ctx->ifc_flags &= ~IFC_NEED_CLEAN;
 }
 
 static iflib_rxsd_t
@@ -3223,6 +3231,8 @@ iflib_if_ioctl(if_t ifp, u_long command, caddr_t data)
 		}
 		bits = if_getdrvflags(ifp);
 		/* stop the driver and free any clusters before proceeding */
+		if (ifr->ifr_mtu < if_getmtu(ifp))
+			ctx->ifc_flags |= IFC_NEED_CLEAN;
 		iflib_stop(ctx);
 
 		if ((err = IFDI_MTU_SET(ctx, ifr->ifr_mtu)) == 0) {
