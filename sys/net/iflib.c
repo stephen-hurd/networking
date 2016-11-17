@@ -2729,10 +2729,6 @@ defrag:
 	return (err);
 
 defrag_failed:
-#ifdef INVARIANTS
-	if (iflib_verbose_debug)
-		printf("defrag failed\n");
-#endif
 	txq->ift_mbuf_defrag_failed++;
 	txq->ift_map_failed++;
 	m_freem(*m_headp);
