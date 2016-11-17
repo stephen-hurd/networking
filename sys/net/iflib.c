@@ -2934,6 +2934,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 
 	for (desc_used = i = 0; i < count && TXQ_AVAIL(txq) > MAX_TX_DESC(ctx) + 2; i++) {
 		mp = _ring_peek_one(r, cidx, i);
+		MPASS(mp != NULL && *mp != NULL);
 		in_use_prev = txq->ift_in_use;
 		err = iflib_encap(txq, mp);
 		/*
