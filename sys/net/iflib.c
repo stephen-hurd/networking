@@ -2936,17 +2936,16 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		mp = _ring_peek_one(r, cidx, i);
 		MPASS(mp != NULL && *mp != NULL);
 		in_use_prev = txq->ift_in_use;
-		err = iflib_encap(txq, mp);
-		/*
-		 * What other errors should we bail out for?
-		 */
+		if ((err = iflib_encap(txq, mp)) == ENOBUFS) {
+			DBG_COUNTER_INC(txq_drain_encapfail);
+			/* no room - bail out */
+			break;
+		}
+		consumed++;
 		if (err) {
 			DBG_COUNTER_INC(txq_drain_encapfail);
-			if (err != ENOBUFS) {
-				consumed++;
-				continue;
-			} else
-				break;
+			/* we can't send this packet - skip it */
+			continue;
 		}
 		pkt_sent++;
 		m = *mp;
