@@ -509,11 +509,13 @@ tcp_signature_verify_input(struct mbuf *m, int off0, int tlen, int optlen,
  *	  the ack that opens up a 0-sized window.
  *	- LRO wasn't used for this segment. We make sure by checking that the
  *	  segment size is not larger than the MSS.
+ *	- The congestion window is more than 16 segments
  */
 #define DELAY_ACK(tp, tlen)						\
 	((!tcp_timer_active(tp, TT_DELACK) &&				\
 	    (tp->t_flags & TF_RXWIN0SENT) == 0) &&			\
 	    (tlen <= tp->t_maxseg) &&					\
+	    (tp->snd_cwnd >= tp->t_maxseg*16) &&			\
 	    (V_tcp_delack_enabled || (tp->t_flags & TF_NEEDSYN)))
 
 static void inline
