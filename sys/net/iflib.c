@@ -512,7 +512,7 @@ static SYSCTL_NODE(_net, OID_AUTO, iflib, CTLFLAG_RD, 0,
 static int iflib_min_tx_latency = 0;
 
 SYSCTL_INT(_net_iflib, OID_AUTO, min_tx_latency, CTLFLAG_RW,
-		   &iflib_min_tx_latency, 0, "minimize transmit latency at the possibel expense of throughput");
+		   &iflib_min_tx_latency, 0, "minimize transmit latency at the possible expense of throughput");
 
 
 #if IFLIB_DEBUG_COUNTERS
@@ -607,10 +607,23 @@ SYSCTL_INT(_net_iflib, OID_AUTO, verbose_debug, CTLFLAG_RW,
 		   &iflib_verbose_debug, 0, "enable verbose debugging");
 
 #define DBG_COUNTER_INC(name) atomic_add_int(&(iflib_ ## name), 1)
+static void
+iflib_debug_reset(void)
+{
+	iflib_tx_seen = iflib_tx_sent = iflib_tx_encap = iflib_rx_allocs =
+		iflib_fl_refills = iflib_fl_refills_large = iflib_tx_frees =
+		iflib_txq_drain_flushing = iflib_txq_drain_oactive =
+		iflib_txq_drain_notready = iflib_txq_drain_encapfail =
+		iflib_encap_load_mbuf_fail = iflib_encap_txq_avail_fail =
+		iflib_encap_txd_encap_fail = iflib_task_fn_rxs = iflib_rx_intr_enables =
+		iflib_fast_intrs = iflib_intr_link = iflib_intr_msix = iflib_rx_unavail =
+		iflib_rx_ctx_inactive = iflib_rx_zero_len = iflib_rx_if_input =
+		iflib_rx_mbuf_null = iflib_rxd_flush = 0;
+}
 
 #else
 #define DBG_COUNTER_INC(name)
-
+static void iflib_debug_reset(void) {}
 #endif
 
 
@@ -1938,6 +1951,7 @@ iflib_stop(if_ctx_t ctx)
 	IFDI_STOP(ctx);
 	DELAY(100000);
 
+	iflib_debug_reset();
 	/* Wait for current tx queue users to exit to disarm watchdog timer. */
 	for (i = 0; i < scctx->isc_ntxqsets; i++, txq++) {
 		/* make sure all transmitters have completed before proceeding XXX */
