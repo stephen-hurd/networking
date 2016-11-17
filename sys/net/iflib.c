@@ -2734,6 +2734,10 @@ defrag:
 	return (err);
 
 defrag_failed:
+#ifdef INVARIANTS
+	if (iflib_verbose_debug)
+		printf("defrag failed\n");
+#endif
 	txq->ift_mbuf_defrag_failed++;
 	txq->ift_map_failed++;
 	m_freem(*m_headp);
@@ -2922,6 +2926,11 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 	}
 	consumed = mcast_sent = bytes_sent = pkt_sent = 0;
 	count = MIN(avail, TX_BATCH_SIZE);
+#ifdef INVARIANTS
+	if (iflib_verbose_debug)
+		printf("%s avail=%d ifc_flags=%x txq_avail=%d ", __FUNCTION__,
+		       avail, ctx->ifc_flags, TXQ_AVAIL(txq));
+#endif
 
 	for (desc_used = i = 0; i < count && TXQ_AVAIL(txq) > MAX_TX_DESC(ctx) + 2; i++) {
 		mp = _ring_peek_one(r, cidx, i);
@@ -2930,14 +2939,13 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		/*
 		 * What other errors should we bail out for?
 		 */
-		if (err == ENOBUFS) {
-			DBG_COUNTER_INC(txq_drain_encapfail);
-			break;
-		}
-		consumed++;
 		if (err) {
 			DBG_COUNTER_INC(txq_drain_encapfail);
-			continue;
+			if (err != ENOBUFS) {
+				consumed++;
+				continue;
+			} else
+				break;
 		}
 		pkt_sent++;
 		m = *mp;
@@ -2969,7 +2977,10 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 	if_inc_counter(ifp, IFCOUNTER_OPACKETS, pkt_sent);
 	if (mcast_sent)
 		if_inc_counter(ifp, IFCOUNTER_OMCASTS, mcast_sent);
-
+#ifdef INVARIANTS
+	if (iflib_verbose_debug)
+		printf("consumed=%d\n", consumed);
+#endif
 	return (consumed);
 }
 
