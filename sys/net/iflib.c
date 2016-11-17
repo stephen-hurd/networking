@@ -2935,9 +2935,10 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 			break;
 		}
 		consumed++;
-		if (err)
+		if (err) {
+			DBG_COUNTER_INC(txq_drain_encapfail);
 			continue;
-
+		}
 		pkt_sent++;
 		m = *mp;
 		DBG_COUNTER_INC(tx_sent);
