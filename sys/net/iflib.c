@@ -2984,6 +2984,7 @@ iflib_txq_drain_free(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		mp = _ring_peek_one(r, cidx, i);
 		m_freem(*mp);
 	}
+	MPASS(ifmp_ring_is_stalled(r) == 0);
 	return (avail);
 }
 
@@ -2996,7 +2997,7 @@ iflib_ifmp_purge(iflib_txq_t txq)
 	r->drain = iflib_txq_drain_free;
 	r->can_drain = iflib_txq_drain_always;
 
-	ifmp_ring_check_drainage(r, 0);
+	ifmp_ring_check_drainage(r, r->size);
 
 	r->drain = iflib_txq_drain;
 	r->can_drain = iflib_txq_can_drain;
