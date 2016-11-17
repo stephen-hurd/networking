@@ -1936,6 +1936,7 @@ iflib_stop(if_ctx_t ctx)
 	IFDI_INTR_DISABLE(ctx);
 	DELAY(100000);
 	IFDI_STOP(ctx);
+	DELAY(100000);
 
 	/* Wait for current tx queue users to exit to disarm watchdog timer. */
 	for (i = 0; i < scctx->isc_ntxqsets; i++, txq++) {
@@ -2971,12 +2972,18 @@ iflib_txq_drain_free(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 	iflib_txq_t txq;
 
 	txq = r->cookie;
+
+	txq->ift_qstatus = IFLIB_QUEUE_IDLE;
+	CALLOUT_LOCK(txq);
+	callout_stop(&txq->ift_timer);
+	callout_stop(&txq->ift_db_check);
+	CALLOUT_UNLOCK(txq);
+
 	avail = IDXDIFF(pidx, cidx, r->size);
 	for (i = 0; i < avail; i++) {
 		mp = _ring_peek_one(r, cidx, i);
 		m_freem(*mp);
 	}
-	iflib_completed_tx_reclaim(txq, txq->ift_size-1);
 	return (avail);
 }
 
