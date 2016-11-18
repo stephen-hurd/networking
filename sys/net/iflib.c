@@ -93,12 +93,6 @@ __FBSDID("$FreeBSD$");
 #include <x86/iommu/busdma_dmar.h>
 #endif
 
-#ifdef IFLIB_DIAGNOSTICS
-#define DPRINTF printf
-#else
-#define DPRINTF(...)
-#endif
-
 /*
  * enable accounting of every mbuf as it comes in to and goes out of iflib's software descriptor references
  */
@@ -1291,11 +1285,6 @@ iflib_txsd_alloc(iflib_txq_t txq)
 					  sctx->isc_tx_maxsize, nsegments, sctx->isc_tx_maxsegsize);
 		goto fail;
 	}
-#ifdef IFLIB_DIAGNOSTICS
-	device_printf(dev,"maxsize: %zd nsegments: %d maxsegsize: %zd\n",
-		      sctx->isc_tx_maxsize, nsegments, sctx->isc_tx_maxsegsize);
-
-#endif
 	if ((err = bus_dma_tag_create(bus_get_dma_tag(dev),
 			       1, 0,			/* alignment, bounds */
 			       BUS_SPACE_MAXADDR,	/* lowaddr */
@@ -1312,11 +1301,6 @@ iflib_txsd_alloc(iflib_txq_t txq)
 
 		goto fail;
 	}
-#ifdef IFLIB_DIAGNOSTICS
-	device_printf(dev,"TSO maxsize: %d ntsosegments: %d maxsegsize: %d\n",
-		      scctx->isc_tx_tso_size_max, ntsosegments,
-		      scctx->isc_tx_tso_segsize_max);
-#endif
 	if (!(txq->ift_sds.ifsd_flags =
 	    (uint8_t *) malloc(sizeof(uint8_t) *
 	    scctx->isc_ntxd[txq->ift_br_offset], M_IFLIB, M_NOWAIT | M_ZERO))) {
@@ -4466,7 +4450,6 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 	if (type == IFLIB_INTR_ADMIN)
 		return (0);
 
-	DPRINTF("%s name=%s rid=%d\n", __FUNCTION__, name, tqrid);
 	if (tqrid != -1) {
 		cpuid = find_nth(ctx, &cpus, qid);
 		taskqgroup_attach_cpu(tqg, gtask, q, cpuid, irq->ii_rid, name);
@@ -5054,14 +5037,6 @@ iflib_add_device_sysctl_post(if_ctx_t ctx)
 		SYSCTL_ADD_COUNTER_U64(ctx_list, queue_list, OID_AUTO, "r_abdications",
 				       CTLFLAG_RD, &txq->ift_br[0]->abdications,
 				       "# of consumer abdications in the mp_ring for this queue");
-#ifdef IFLIB_DIAGNOSTICS
-		for (j = 0; j < mp_ncpus; j++) {
-			snprintf(namebuf, NAME_BUFLEN, "cpu%d", j);
-			SYSCTL_ADD_QUAD(ctx_list, queue_list, OID_AUTO, namebuf,
-				   CTLFLAG_RD,
-				   &txq->ift_cpu_exec_count[j], "# of tx on cpu");
-		}
-#endif
 	}
 
 	if (scctx->isc_nrxqsets > 100)
@@ -5083,14 +5058,6 @@ iflib_add_device_sysctl_post(if_ctx_t ctx)
 				       CTLFLAG_RD,
 				       &rxq->ifr_cq_cidx, 1, "Consumer Index");
 		}
-#ifdef IFLIB_DIAGNOSTICS
-		for (j = 0; j < mp_ncpus; j++) {
-			snprintf(namebuf, NAME_BUFLEN, "cpu%d", j);
-			SYSCTL_ADD_QUAD(ctx_list, queue_list, OID_AUTO, namebuf,
-				   CTLFLAG_RD,
-				   &rxq->ifr_cpu_exec_count[j], "# of rx on cpu");
-		}
-#endif
 
 		for (j = 0, fl = rxq->ifr_fl; j < rxq->ifr_nfl; j++, fl++) {
 			snprintf(namebuf, NAME_BUFLEN, "rxq_fl%d", j);
