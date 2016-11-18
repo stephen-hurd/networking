@@ -800,6 +800,8 @@
 
       &hwlist.bge;
 
+      &hwlist.bnxt;
+
       &hwlist.bxe;
 
       &hwlist.cas;
@@ -1012,8 +1014,6 @@
       &hwlist.ural;
 
       &hwlist.urtw;
-
-      &hwlist.urtwn;
 
       <para>[&arch.amd64;, &arch.i386;, &arch.pc98;] Lucent
 	Technologies WaveLAN/IEEE 802.11b wireless network adapters

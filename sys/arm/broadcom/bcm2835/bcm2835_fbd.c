@@ -43,7 +43,6 @@ __FBSDID("$FreeBSD$");
 #include <vm/vm.h>
 #include <vm/pmap.h>
 
-#include <dev/fdt/fdt_common.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
@@ -119,8 +118,10 @@ bcm_fb_setup_fbd(struct bcmsc_softc *sc)
 	sc->info.fb_stride = fb.pitch;
 	sc->info.fb_width = fb.xres;
 	sc->info.fb_height = fb.yres;
+#ifdef VM_MEMATTR_WRITE_COMBINING
 	sc->info.fb_flags = FB_FLAG_MEMATTR;
 	sc->info.fb_memattr = VM_MEMATTR_WRITE_COMBINING;
+#endif
 
 	if (sc->fbswap) {
 		switch (sc->info.fb_bpp) {

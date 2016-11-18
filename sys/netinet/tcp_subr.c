@@ -742,7 +742,10 @@ tcp_init(void)
 static void
 tcp_destroy(void *unused __unused)
 {
-	int error, n;
+	int n;
+#ifdef TCP_HHOOK
+	int error;
+#endif
 
 	/*
 	 * All our processes are gone, all our sockets should be cleaned
@@ -1965,7 +1968,8 @@ tcp_ctlinput(int cmd, struct sockaddr *sa, void *vip)
 	if (cmd == PRC_MSGSIZE)
 		notify = tcp_mtudisc_notify;
 	else if (V_icmp_may_rst && (cmd == PRC_UNREACH_ADMIN_PROHIB ||
-		cmd == PRC_UNREACH_PORT || cmd == PRC_TIMXCEED_INTRANS) && ip)
+		cmd == PRC_UNREACH_PORT || cmd == PRC_UNREACH_PROTOCOL || 
+		cmd == PRC_TIMXCEED_INTRANS) && ip)
 		notify = tcp_drop_syn_sent;
 
 	/*
@@ -2097,8 +2101,8 @@ tcp6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 	if (cmd == PRC_MSGSIZE)
 		notify = tcp_mtudisc_notify;
 	else if (V_icmp_may_rst && (cmd == PRC_UNREACH_ADMIN_PROHIB ||
-		cmd == PRC_UNREACH_PORT || cmd == PRC_TIMXCEED_INTRANS) &&
-		ip6 != NULL)
+		cmd == PRC_UNREACH_PORT || cmd == PRC_UNREACH_PROTOCOL || 
+		cmd == PRC_TIMXCEED_INTRANS) && ip6 != NULL)
 		notify = tcp_drop_syn_sent;
 
 	/*
@@ -2727,6 +2731,7 @@ tcp_signature_do_compute(struct mbuf *m, int len, int optlen,
 	 * Note: Upper-Layer Packet Length comes before Next Header.
 	 */
 	case (IPV6_VERSION >> 4):
+		ip6 = mtod(m, struct ip6_hdr *);
 		in6 = ip6->ip6_src;
 		in6_clearscope(&in6);
 		MD5Update(&ctx, (char *)&in6, sizeof(struct in6_addr));
