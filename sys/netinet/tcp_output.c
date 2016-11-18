@@ -253,9 +253,6 @@ tcp_output(struct tcpcb *tp)
 		}
 	}
 again:
-	curticks = tcp_ts_getticks();
-	if (tp->t_rxtshift == 1 && (tp->t_flags & TF_RCVD_TSTMP))
-		tp->t_badrxtwin = curticks;
 	/*
 	 * If we've recently taken a timeout, snd_max will be greater than
 	 * snd_nxt.  There may be SACK information that allows us to avoid
@@ -806,9 +803,12 @@ send:
 		/* Timestamps. */
 		if ((tp->t_flags & TF_RCVD_TSTMP) ||
 		    ((flags & TH_SYN) && (tp->t_flags & TF_REQ_TSTMP))) {
+			curticks = tcp_ts_getticks();
 			to.to_tsval = curticks + tp->ts_offset;
 			to.to_tsecr = tp->ts_recent;
 			to.to_flags |= TOF_TS;
+			if (tp->t_rxtshift == 1)
+				tp->t_badrxtwin = curticks;
 			/* Set receive buffer autosizing timestamp. */
 			if (tp->rfbuf_ts == 0 &&
 			    (so->so_rcv.sb_flags & SB_AUTOSIZE))
