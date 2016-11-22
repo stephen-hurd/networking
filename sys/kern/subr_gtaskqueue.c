@@ -634,6 +634,11 @@ taskqgroup_attach(struct taskqgroup *qgroup, struct grouptask *gtask,
 	qid = taskqgroup_find(qgroup, uniq);
 	qgroup->tqg_queue[qid].tgc_cnt++;
 	LIST_INSERT_HEAD(&qgroup->tqg_queue[qid].tgc_tasks, gtask, gt_list);
+#ifdef INVARIANTS
+	printf("qgroup->tqg_queue[qid].tgc_cnt=%d\n", qgroup->tqg_queue[qid].tgc_cnt);
+	LIST_REMOVE(gtask, gt_list);
+	LIST_INSERT_HEAD(&qgroup->tqg_queue[qid].tgc_tasks, gtask, gt_list);
+#endif
 	gtask->gt_taskqueue = qgroup->tqg_queue[qid].tgc_taskq;
 	if (irq != -1 && smp_started) {
 		gtask->gt_cpu = qgroup->tqg_queue[qid].tgc_cpu;
@@ -699,6 +704,11 @@ taskqgroup_attach_cpu(struct taskqgroup *qgroup, struct grouptask *gtask,
 		qid = 0;
 	qgroup->tqg_queue[qid].tgc_cnt++;
 	LIST_INSERT_HEAD(&qgroup->tqg_queue[qid].tgc_tasks, gtask, gt_list);
+#ifdef INVARIANTS
+	printf("qgroup->tqg_queue[qid].tgc_cnt=%d\n", qgroup->tqg_queue[qid].tgc_cnt);
+	LIST_REMOVE(gtask, gt_list);
+	LIST_INSERT_HEAD(&qgroup->tqg_queue[qid].tgc_tasks, gtask, gt_list);
+#endif
 	gtask->gt_taskqueue = qgroup->tqg_queue[qid].tgc_taskq;
 	cpu = qgroup->tqg_queue[qid].tgc_cpu;
 	mtx_unlock(&qgroup->tqg_lock);
