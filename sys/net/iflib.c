@@ -3679,6 +3679,12 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 		goto fail_queues;
 	}
 
+	IFDI_INTR_DISABLE(ctx);
+	/*
+	 * group taskqueues aren't properly set up until SMP is started
+	 * so we disable interrupts until we can handle them post
+	 * SI_SUB_SMP
+	 */
 	if (msix > 1 && (err = IFDI_MSIX_INTR_ASSIGN(ctx, msix)) != 0) {
 		device_printf(dev, "IFDI_MSIX_INTR_ASSIGN failed %d\n", err);
 		goto fail_intr_free;
@@ -4558,6 +4564,12 @@ iflib_rx_intr_deferred(if_ctx_t ctx, int rxqid)
 void
 iflib_admin_intr_deferred(if_ctx_t ctx)
 {
+#ifdef INVARIANTS
+	struct grouptask *gtask;
+
+	gtask = &ctx->ifc_admin_task;
+	MPASS(gtask->gt_taskqueue != NULL);
+#endif
 
 	GROUPTASK_ENQUEUE(&ctx->ifc_admin_task);
 }
