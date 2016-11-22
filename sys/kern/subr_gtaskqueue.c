@@ -584,6 +584,9 @@ taskqgroup_find(struct taskqgroup *qgroup, void *uniq)
 	int i, idx, mincnt;
 	int strict;
 
+	if (!smp_started)
+		return (0);
+
 	mtx_assert(&qgroup->tqg_lock, MA_OWNED);
 	if (qgroup->tqg_cnt == 0)
 		return (0);
@@ -632,6 +635,7 @@ taskqgroup_attach(struct taskqgroup *qgroup, struct grouptask *gtask,
 	qgroup->tqg_queue[qid].tgc_cnt++;
 	LIST_INSERT_HEAD(&qgroup->tqg_queue[qid].tgc_tasks, gtask, gt_list);
 	gtask->gt_taskqueue = qgroup->tqg_queue[qid].tgc_taskq;
+	MPASS(gtask->gt_taskqueue != NULL);
 	if (irq != -1 && smp_started) {
 		gtask->gt_cpu = qgroup->tqg_queue[qid].tgc_cpu;
 		CPU_ZERO(&mask);
