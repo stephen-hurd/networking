@@ -1192,6 +1192,9 @@ iflib_fast_intr(void *arg)
 	iflib_filter_info_t info = arg;
 	struct grouptask *gtask = info->ifi_task;
 
+	if (!smp_started)
+		return (FILTER_HANDLED);
+
 	DBG_COUNTER_INC(fast_intrs);
 	if (info->ifi_filter != NULL && info->ifi_filter(info->ifi_filter_arg) == FILTER_HANDLED)
 		return (FILTER_HANDLED);
