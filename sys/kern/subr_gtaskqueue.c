@@ -851,7 +851,9 @@ _taskqgroup_adjust(struct taskqgroup *qgroup, int cnt, int stride)
 	 * Adjust drivers to use new taskqs.
 	 */
 	for (i = 0; i < old_cnt; i++) {
+		MPASS(qgroup->tqg_queue[i].tgc_cnt > 0);
 		while ((gtask = LIST_FIRST(&qgroup->tqg_queue[i].tgc_tasks))) {
+			MPASS(qgroup->tqg_queue[i].tgc_cnt > 0);
 			LIST_REMOVE(gtask, gt_list);
 			qgroup->tqg_queue[i].tgc_cnt--;
 			LIST_INSERT_HEAD(&gtask_head, gtask, gt_list);
