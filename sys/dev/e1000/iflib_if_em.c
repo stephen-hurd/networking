@@ -2376,6 +2376,7 @@ em_if_disable_intr(if_ctx_t ctx)
 
 	if (hw->mac.type == e1000_82574)
 		E1000_WRITE_REG(hw, EM_EIAC, 0);
+	device_printf(iflib_get_dev(ctx), "/* Manually turn off all interrupts */\n");
 	E1000_WRITE_REG(&adapter->hw, E1000_IMC, 0xffffffff);
 	device_printf(iflib_get_dev(ctx), "%s\n", __FUNCTION__);
 }

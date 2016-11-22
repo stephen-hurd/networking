@@ -3680,11 +3680,6 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 	}
 
 	IFDI_INTR_DISABLE(ctx);
-	/*
-	 * group taskqueues aren't properly set up until SMP is started
-	 * so we disable interrupts until we can handle them post
-	 * SI_SUB_SMP
-	 */
 	if (msix > 1 && (err = IFDI_MSIX_INTR_ASSIGN(ctx, msix)) != 0) {
 		device_printf(dev, "IFDI_MSIX_INTR_ASSIGN failed %d\n", err);
 		goto fail_intr_free;
@@ -4512,6 +4507,13 @@ iflib_legacy_setup(if_ctx_t ctx, driver_filter_t filter, void *filter_arg, int *
 	int tqrid;
 	void *q;
 	int err;
+
+	/*
+	 * group taskqueues aren't properly set up until SMP is started
+	 * so we disable interrupts until we can handle them post
+	 * SI_SUB_SMP
+	 */
+	IFDI_INTR_DISABLE(ctx);
 
 	q = &ctx->ifc_rxqs[0];
 	info = &rxq[0].ifr_filter_info;
