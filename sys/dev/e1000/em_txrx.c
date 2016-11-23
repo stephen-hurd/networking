@@ -557,9 +557,7 @@ em_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 
 		ri->iri_frags[i].irf_flid = 0;
 		ri->iri_frags[i].irf_idx = cidx;
-#ifdef notyet
 		ri->iri_frags[i].irf_len = len;
-#endif		
 		/* Zero out the receive descriptors status. */
 		rxd->wb.upper.status_error &= htole32(~0xFF);
 
