@@ -350,7 +350,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 			cidx_last = i;
 			if (++i == scctx->isc_ntxd[0])
 				i = 0;
-			device_printf(iflib_get_dev(sc->ctx), "TSO path cidx_last==%d i=%d ntxd[0]=%d\n", cidx_last, i, scctx->isc_ntxd[0]);
+			device_printf(iflib_get_dev(sc->ctx), "TSO path cidx_last=%d i=%d ntxd[0]=%d\n", cidx_last, i, scctx->isc_ntxd[0]);
 		} else {
 			ctxd->buffer_addr = htole64(seg_addr);
 			ctxd->lower.data = htole32(sc->txd_cmd | txd_lower | seg_len);
@@ -358,7 +358,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 			cidx_last = i;
 			if (++i == scctx->isc_ntxd[0])
 				i = 0;
-			device_printf(iflib_get_dev(sc->ctx), "cidx_last==%d i=%d ntxd[0]=%d\n", cidx_last, i, scctx->isc_ntxd[0]);
+			device_printf(iflib_get_dev(sc->ctx), "cidx_last=%d i=%d ntxd[0]=%d\n", cidx_last, i, scctx->isc_ntxd[0]);
 		}
 		tx_buffer->eop = -1;
 	}
@@ -407,6 +407,8 @@ em_isc_txd_credits_update(void *arg, uint16_t txqid, uint32_t cidx_init, bool cl
         last = buf->eop;
 	eop_desc = &txr->tx_base[last];
 
+	device_printf(iflib_get_dev(adapter->ctx), "credits_update: cidx_init=%d clear=%d last=%d\n",
+		      cidx_init, clear, last);
 	/*
 	 * What this does is get the index of the
 	 * first descriptor AFTER the EOP of the
