@@ -316,7 +316,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
                 txd_lower |= htole32(E1000_TXD_CMD_VLE);
 	}
 
-	device_printf(iflib_get_dev(sc->ctx), "encap: set up tx: nsegs=%d pidx=%d\n", nsegs, first);
+	device_printf(iflib_get_dev(sc->ctx), "encap: set up tx: nsegs=%d first=%d i=%d\n", nsegs, first, i);
 	/* Set up our transmit descriptors */
 	for (j = 0; j < nsegs; j++) {
 		bus_size_t seg_len;
