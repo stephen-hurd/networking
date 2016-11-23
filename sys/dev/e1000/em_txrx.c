@@ -373,6 +373,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 
 	tx_buffer = &txr->tx_buffers[first];
 	tx_buffer->eop = cidx_last;
+	device_printf(iflib_get_dev(sc->ctx), "tx_buffers[%d]->eop = %d\n", first, cidx_last);
 	pi->ipi_new_pidx = i;
 
 	return (0); 
