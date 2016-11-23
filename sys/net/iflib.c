@@ -4640,6 +4640,8 @@ iflib_tx_credits_update(if_ctx_t ctx, iflib_txq_t txq)
 
 	if (txq->ift_cidx_processed >= txq->ift_size)
 		txq->ift_cidx_processed -= txq->ift_size;
+	device_printf(ctx->ifc_dev, "iflib credits_update: credits=%d txq->ift_cidx_processed=%d, txq->ift_cidx=%d\n",
+		      credits, 	txq->ift_cidx_processed, txq->ift_cidx);
 	return (credits);
 }
 
