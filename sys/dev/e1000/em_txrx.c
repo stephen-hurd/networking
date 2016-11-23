@@ -500,17 +500,12 @@ em_isc_rxd_available(void *arg, uint16_t rxqid, uint32_t idx, int budget)
 	u32                      staterr = 0;
 	int                      cnt, i;
 
-        device_printf(iflib_get_dev(sc->ctx), "em_isc_rxd_available called\n"); 
-	
 	for (cnt = 0, i = idx; cnt < scctx->isc_nrxd[0] && cnt <= budget;) {
 		rxd = &rxr->rx_base[i];
 		staterr = le32toh(rxd->wb.upper.status_error);
-                device_printf(iflib_get_dev(sc->ctx), "Count %d\n", cnt); 
-		device_printf(iflib_get_dev(sc->ctx), "Staterr %d\n", staterr); 
-		
-		if ((staterr & E1000_RXD_STAT_DD) == 0) {
+
+		if ((staterr & E1000_RXD_STAT_DD) == 0)
 			break;
-		}
 		
 		if (++i == scctx->isc_nrxd[0]) {
 			i = 0;
