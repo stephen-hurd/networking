@@ -178,11 +178,11 @@ em_transmit_checksum_setup(struct adapter *adapter, if_pkt_info_t pi, u32 *txd_u
  				    	txr->last_hw_ipcso == ipcso &&
  				    	txr->last_hw_tucss == tucss &&
  				    	txr->last_hw_tucso == tucso)
-						return 0;
+						return (cur);
  				} else {
  					if (txr->last_hw_tucss == tucss &&
  				    	txr->last_hw_tucso == tucso)
-						return 0;
+						return (cur);
  				}
   			}
  			txr->last_hw_offload = offload;
@@ -225,11 +225,11 @@ em_transmit_checksum_setup(struct adapter *adapter, if_pkt_info_t pi, u32 *txd_u
  				    	txr->last_hw_ipcso == ipcso &&
  				    	txr->last_hw_tucss == tucss &&
  				    	txr->last_hw_tucso == tucso)
-						return 0;
+						return (cur);
 				} else {
 					if (txr->last_hw_tucss == tucss &&
 					    txr->last_hw_tucso == tucso)
-						return 0;
+						return (cur);
  				}
  			}
  			txr->last_hw_offload = offload;
