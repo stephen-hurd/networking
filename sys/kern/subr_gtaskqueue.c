@@ -584,9 +584,6 @@ taskqgroup_find(struct taskqgroup *qgroup, void *uniq)
 	int i, idx, mincnt;
 	int strict;
 
-	if (!smp_started)
-		return (0);
-
 	mtx_assert(&qgroup->tqg_lock, MA_OWNED);
 	if (qgroup->tqg_cnt == 0)
 		return (0);
@@ -634,11 +631,6 @@ taskqgroup_attach(struct taskqgroup *qgroup, struct grouptask *gtask,
 	qid = taskqgroup_find(qgroup, uniq);
 	qgroup->tqg_queue[qid].tgc_cnt++;
 	LIST_INSERT_HEAD(&qgroup->tqg_queue[qid].tgc_tasks, gtask, gt_list);
-#ifdef INVARIANTS
-	printf("qgroup->tqg_queue[qid].tgc_cnt=%d\n", qgroup->tqg_queue[qid].tgc_cnt);
-	LIST_REMOVE(gtask, gt_list);
-	LIST_INSERT_HEAD(&qgroup->tqg_queue[qid].tgc_tasks, gtask, gt_list);
-#endif
 	gtask->gt_taskqueue = qgroup->tqg_queue[qid].tgc_taskq;
 	if (irq != -1 && smp_started) {
 		gtask->gt_cpu = qgroup->tqg_queue[qid].tgc_cpu;
@@ -704,11 +696,6 @@ taskqgroup_attach_cpu(struct taskqgroup *qgroup, struct grouptask *gtask,
 		qid = 0;
 	qgroup->tqg_queue[qid].tgc_cnt++;
 	LIST_INSERT_HEAD(&qgroup->tqg_queue[qid].tgc_tasks, gtask, gt_list);
-#ifdef INVARIANTS
-	printf("qgroup->tqg_queue[qid].tgc_cnt=%d\n", qgroup->tqg_queue[qid].tgc_cnt);
-	LIST_REMOVE(gtask, gt_list);
-	LIST_INSERT_HEAD(&qgroup->tqg_queue[qid].tgc_tasks, gtask, gt_list);
-#endif
 	gtask->gt_taskqueue = qgroup->tqg_queue[qid].tgc_taskq;
 	cpu = qgroup->tqg_queue[qid].tgc_cpu;
 	mtx_unlock(&qgroup->tqg_lock);
@@ -818,7 +805,7 @@ _taskqgroup_adjust(struct taskqgroup *qgroup, int cnt, int stride)
 {
 	LIST_HEAD(, grouptask) gtask_head = LIST_HEAD_INITIALIZER(NULL);
 	struct grouptask *gtask;
-	int i, k, old_cnt, old_cpu, cpu, taskcnt;
+	int i, k, old_cnt, old_cpu, cpu;
 
 	mtx_assert(&qgroup->tqg_lock, MA_OWNED);
 
@@ -837,14 +824,12 @@ _taskqgroup_adjust(struct taskqgroup *qgroup, int cnt, int stride)
 	if (old_cnt < cnt)
 		old_cpu = qgroup->tqg_queue[old_cnt].tgc_cpu;
 	mtx_unlock(&qgroup->tqg_lock);
-	taskcnt = 0;
 	/*
 	 * Set up queue for tasks added before boot.
 	 */
 	if (old_cnt == 0) {
 		LIST_SWAP(&gtask_head, &qgroup->tqg_queue[0].tgc_tasks,
 		    grouptask, gt_list);
-		taskcnt = qgroup->tqg_queue[0].tgc_cnt;
 		qgroup->tqg_queue[0].tgc_cnt = 0;
 	}
 
@@ -866,23 +851,15 @@ _taskqgroup_adjust(struct taskqgroup *qgroup, int cnt, int stride)
 	 * Adjust drivers to use new taskqs.
 	 */
 	for (i = 0; i < old_cnt; i++) {
-		MPASS(qgroup->tqg_queue[i].tgc_cnt > 0);
 		while ((gtask = LIST_FIRST(&qgroup->tqg_queue[i].tgc_tasks))) {
-			MPASS(qgroup->tqg_queue[i].tgc_cnt > 0);
 			LIST_REMOVE(gtask, gt_list);
 			qgroup->tqg_queue[i].tgc_cnt--;
-			taskcnt++;
 			LIST_INSERT_HEAD(&gtask_head, gtask, gt_list);
 		}
 	}
 	mtx_unlock(&qgroup->tqg_lock);
 
-	printf("qgroup=%p cnt=%d stride=%d old_cnt=%d taskcnt=%d\n", qgroup, cnt, stride, old_cnt, taskcnt);
-
-	MPASS(taskcnt > 0);
 	while ((gtask = LIST_FIRST(&gtask_head))) {
-		MPASS(taskcnt > 0);
-		taskcnt--;
 		LIST_REMOVE(gtask, gt_list);
 		if (gtask->gt_cpu == -1)
 			taskqgroup_attach_deferred(qgroup, gtask);
