@@ -4630,6 +4630,9 @@ static int
 iflib_tx_credits_update(if_ctx_t ctx, iflib_txq_t txq)
 {
 	int credits;
+#ifdef INVARIANTS
+	int credits_pre = txq->ift_cidx_processed;
+#endif	
 
 	if (ctx->isc_txd_credits_update == NULL)
 		return (0);
@@ -4643,10 +4646,12 @@ iflib_tx_credits_update(if_ctx_t ctx, iflib_txq_t txq)
 	txq->ift_processed += credits;
 	txq->ift_cidx_processed += credits;
 
+	MPASS(credits_pre + credits == txq->ift_cidx_processed);
 	if (txq->ift_cidx_processed >= txq->ift_size)
 		txq->ift_cidx_processed -= txq->ift_size;
 	device_printf(ctx->ifc_dev, "post txq->ift_cidx_processed=%d, credits=%d, txq->ift_cidx=%d\n",
 		      credits, 	txq->ift_cidx_processed, txq->ift_cidx);
+
 	return (credits);
 }
 
