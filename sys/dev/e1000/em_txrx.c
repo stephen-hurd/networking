@@ -281,6 +281,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	struct e1000_tx_desc *ctxd = NULL;
 	bool do_tso, tso_desc; 
 	
+	MPASS(nsegs > 0);
 	i = first = pi->ipi_pidx;         
 	do_tso = (csum_flags & CSUM_TSO);
 	tso_desc = FALSE;
@@ -303,6 +304,10 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	} else if (csum_flags & CSUM_OFFLOAD) {
 		i = em_transmit_checksum_setup(sc, pi, &txd_upper, &txd_lower);
 	}
+#ifdef INVARIANTS
+	if (do_tso || (csum_flags & CSUM_OFFLOAD))
+		MPASS(i != first);
+#endif
 
 	if (pi->ipi_mflags & M_VLANTAG) {
 	  /* Set the vlan id. */
@@ -311,6 +316,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
                 txd_lower |= htole32(E1000_TXD_CMD_VLE);
 	}
 
+	device_printf(iflib_get_dev(sc->ctx), "set up tx: nsegs=%d\n", nsegs);
 	/* Set up our transmit descriptors */
 	for (j = 0; j < nsegs; j++) {
 		bus_size_t seg_len;
@@ -342,15 +348,17 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 			ctxd->lower.data = htole32(sc->txd_cmd | txd_lower | TSO_WORKAROUND);
 			ctxd->upper.data = htole32(txd_upper);
 			cidx_last = i;
-			if (++i == scctx-> isc_ntxd[0])
+			if (++i == scctx->isc_ntxd[0])
 				i = 0;
+			device_printf(iflib_get_dev(sc->ctx), "TSO path cidx_last==%d i=%d ntxd[0]=%d\n", cidx_last, i, scctx->isc_ntxd[0]);
 		} else {
 			ctxd->buffer_addr = htole64(seg_addr);
 			ctxd->lower.data = htole32(sc->txd_cmd | txd_lower | seg_len);
 			ctxd->upper.data = htole32(txd_upper);
 			cidx_last = i;
-			if (++i == scctx-> isc_ntxd[0])
+			if (++i == scctx->isc_ntxd[0])
 				i = 0;
+			device_printf(iflib_get_dev(sc->ctx), "cidx_last==%d i=%d ntxd[0]=%d\n", cidx_last, i, scctx->isc_ntxd[0]);
 		}
 		tx_buffer->eop = -1;
 	}
@@ -549,7 +557,9 @@ em_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 
 		ri->iri_frags[i].irf_flid = 0;
 		ri->iri_frags[i].irf_idx = cidx;
+#ifdef notyet
 		ri->iri_frags[i].irf_len = len;
+#endif		
 		/* Zero out the receive descriptors status. */
 		rxd->wb.upper.status_error &= htole32(~0xFF);
 
