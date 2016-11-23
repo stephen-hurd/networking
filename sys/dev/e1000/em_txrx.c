@@ -274,7 +274,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	bus_dma_segment_t *segs  = pi->ipi_segs;
 	int nsegs                = pi->ipi_nsegs;
 	int csum_flags           = pi->ipi_csum_flags;
-        int i, j, first, cidx_last; 
+        int i, j, first, pidx_last; 
 	u32                     txd_upper = 0, txd_lower = 0; 
 	
 	struct em_txbuffer *tx_buffer;
@@ -316,7 +316,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
                 txd_lower |= htole32(E1000_TXD_CMD_VLE);
 	}
 
-	device_printf(iflib_get_dev(sc->ctx), "set up tx: nsegs=%d\n", nsegs);
+	device_printf(iflib_get_dev(sc->ctx), "encap: set up tx: nsegs=%d pidx=%d\n", nsegs, first);
 	/* Set up our transmit descriptors */
 	for (j = 0; j < nsegs; j++) {
 		bus_size_t seg_len;
@@ -347,18 +347,18 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 			ctxd->buffer_addr = htole64(seg_addr + seg_len);
 			ctxd->lower.data = htole32(sc->txd_cmd | txd_lower | TSO_WORKAROUND);
 			ctxd->upper.data = htole32(txd_upper);
-			cidx_last = i;
+			pidx_last = i;
 			if (++i == scctx->isc_ntxd[0])
 				i = 0;
-			device_printf(iflib_get_dev(sc->ctx), "TSO path cidx_last=%d i=%d ntxd[0]=%d\n", cidx_last, i, scctx->isc_ntxd[0]);
+			device_printf(iflib_get_dev(sc->ctx), "TSO path pidx_last=%d i=%d ntxd[0]=%d\n", pidx_last, i, scctx->isc_ntxd[0]);
 		} else {
 			ctxd->buffer_addr = htole64(seg_addr);
 			ctxd->lower.data = htole32(sc->txd_cmd | txd_lower | seg_len);
 			ctxd->upper.data = htole32(txd_upper);
-			cidx_last = i;
+			pidx_last = i;
 			if (++i == scctx->isc_ntxd[0])
 				i = 0;
-			device_printf(iflib_get_dev(sc->ctx), "cidx_last=%d i=%d ntxd[0]=%d\n", cidx_last, i, scctx->isc_ntxd[0]);
+			device_printf(iflib_get_dev(sc->ctx), "pidx_last=%d i=%d ntxd[0]=%d\n", pidx_last, i, scctx->isc_ntxd[0]);
 		}
 		tx_buffer->eop = -1;
 	}
@@ -372,8 +372,8 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 		htole32(E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS);
 
 	tx_buffer = &txr->tx_buffers[first];
-	tx_buffer->eop = cidx_last;
-	device_printf(iflib_get_dev(sc->ctx), "tx_buffers[%d]->eop = %d\n", first, cidx_last);
+	tx_buffer->eop = pidx_last;
+	device_printf(iflib_get_dev(sc->ctx), "tx_buffers[%d]->eop = %d ipi_new_pidx=%d\n", first, pidx_last, i);
 	pi->ipi_new_pidx = i;
 
 	return (0); 
