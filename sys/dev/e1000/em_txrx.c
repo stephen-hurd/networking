@@ -306,10 +306,6 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	} else if (csum_flags & CSUM_OFFLOAD) {
 		i = em_transmit_checksum_setup(sc, pi, &txd_upper, &txd_lower);
 	}
-#ifdef INVARIANTS
-	if (do_tso || (csum_flags & CSUM_OFFLOAD))
-		MPASS(i != first);
-#endif
 
 	if (pi->ipi_mflags & M_VLANTAG) {
 	  /* Set the vlan id. */
