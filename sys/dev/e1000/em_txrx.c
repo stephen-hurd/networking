@@ -109,7 +109,8 @@ em_tso_setup(struct adapter *adapter, if_pkt_info_t pi, u32 *txd_upper, u32 *txd
 	if (++cur == scctx->isc_ntxd[0]) {
 		cur = 0;
 	}
-	return cur;
+	device_printf("%s: pidx: %d cur: %d\n", __FUNCTION__, pi->ipi_pidx, cur);
+	return (cur);
 }
 
 #define TSO_WORKAROUND 4
@@ -261,7 +262,8 @@ em_transmit_checksum_setup(struct adapter *adapter, if_pkt_info_t pi, u32 *txd_u
 	if (++cur == scctx->isc_ntxd[0]) {
 		cur = 0;
 	}
-	return cur;
+	device_printf("%s: pidx: %d cur: %d\n", __FUNCTION__, pi->ipi_pidx, cur);
+	return (cur);
 }
 
 static int
