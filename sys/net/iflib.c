@@ -1928,7 +1928,6 @@ iflib_stop(if_ctx_t ctx)
 	iflib_fl_t fl;
 	int i, j;
 
-	device_printf(ctx->ifc_dev, "iflib_stop\n");
 	/* Tell the stack that the interface is no longer active */
 	if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
 
@@ -4643,9 +4642,6 @@ iflib_tx_credits_update(if_ctx_t ctx, iflib_txq_t txq)
 	if (ctx->isc_txd_credits_update == NULL)
 		return (0);
 
-	device_printf(ctx->ifc_dev, "iflib credits_update: pre txq->ift_cidx_processed=%d ...",
-		      txq->ift_cidx_processed);
-
 	if ((credits = ctx->isc_txd_credits_update(ctx->ifc_softc, txq->ift_id, txq->ift_cidx_processed, true)) == 0)
 		return (0);
 
@@ -4655,9 +4651,6 @@ iflib_tx_credits_update(if_ctx_t ctx, iflib_txq_t txq)
 	MPASS(credits_pre + credits == txq->ift_cidx_processed);
 	if (txq->ift_cidx_processed >= txq->ift_size)
 		txq->ift_cidx_processed -= txq->ift_size;
-	device_printf(ctx->ifc_dev, "post txq->ift_cidx_processed=%d, credits=%d, txq->ift_cidx=%d\n",
-		      txq->ift_cidx_processed, credits, txq->ift_cidx);
-
 	return (credits);
 }
 
