@@ -1972,19 +1972,21 @@ em_initialize_transmit_unit(if_ctx_t ctx)
 	 INIT_DEBUGOUT("em_initialize_transmit_unit: begin");
 
 	for (int i = 0; i < adapter->num_tx_queues; i++, txr++) {
+		u64 bus_addr;
+		caddr_t offp, endp;
+
 	        que = &adapter->tx_queues[i];
-		txr = &que->txr; 
-		u64 bus_addr = txr->tx_paddr;
+		txr = &que->txr;
+		bus_addr = txr->tx_paddr;
 
                 /*Enable all queues */
 		em_init_tx_ring(que);
 
 		/* Clear checksum offload context. */
-		txr->last_hw_offload = 0;
-		txr->last_hw_ipcss = 0;
-		txr->last_hw_ipcso = 0;
-		txr->last_hw_tucss = 0;
-		txr->last_hw_tucso = 0;
+		offp = (caddr_t)&txr->csum_flags;
+		endp = (caddr_t)(txr + 1);
+		printf("bzeroing %ld\n", endp - offp);
+		bzero(offp, endp - offp);
 
 		/* Base and Len of TX Ring */
 		E1000_WRITE_REG(hw, E1000_TDLEN(i),
@@ -2061,7 +2063,6 @@ em_initialize_transmit_unit(if_ctx_t ctx)
 			E1000_WRITE_REG(&adapter->hw, E1000_TARC(0), tarc);
 	}
 
-	adapter->txd_cmd = E1000_TXD_CMD_IFCS;
 	if (adapter->tx_int_delay.value > 0)
 		adapter->txd_cmd |= E1000_TXD_CMD_IDE;
 
@@ -2360,7 +2361,6 @@ em_if_enable_intr(if_ctx_t ctx)
 	struct e1000_hw *hw = &adapter->hw;
 	u32 ims_mask = IMS_ENABLE_MASK;
 
-	device_printf(iflib_get_dev(ctx), "%s\n", __FUNCTION__);
 	if (hw->mac.type == e1000_82574) {
 		E1000_WRITE_REG(hw, EM_EIAC, adapter->ims);
 		ims_mask |= adapter->ims;

@@ -114,6 +114,25 @@ em_tso_setup(struct adapter *adapter, if_pkt_info_t pi, u32 *txd_upper, u32 *txd
 }
 
 #define TSO_WORKAROUND 4
+#define DONT_FORCE_CTX 0
+
+
+/*********************************************************************
+ *  The offload context is protocol specific (TCP/UDP) and thus
+ *  only needs to be set when the protocol changes. The occasion
+ *  of a context change can be a performance detriment, and
+ *  might be better just disabled. The reason arises in the way
+ *  in which the controller supports pipelined requests from the
+ *  Tx data DMA. Up to four requests can be pipelined, and they may
+ *  belong to the same packet or to multiple packets. However all
+ *  requests for one packet are issued before a request is issued
+ *  for a subsequent packet and if a request for the next packet
+ *  requires a context change, that request will be stalled
+ *  until the previous request completes. This means setting up
+ *  a new context effectively disables pipelined Tx data DMA which
+ *  in turn greatly slow down performance to send small sized
+ *  frames. 
+ **********************************************************************/
 
 static int
 em_transmit_checksum_setup(struct adapter *adapter, if_pkt_info_t pi, u32 *txd_upper, u32 *txd_lower)
@@ -124,137 +143,75 @@ em_transmit_checksum_setup(struct adapter *adapter, if_pkt_info_t pi, u32 *txd_u
 	struct tx_ring              *txr = &que->txr;
 	struct em_txbuffer          *tx_buffer;
 	int                         csum_flags = pi->ipi_csum_flags;
-	int                         ip_off = pi->ipi_ehdrlen; 
 	int                         cur, hdr_len;
-	u32                         cmd = 0; 
-	u16			    offload = 0;
-	u8                          ipcso, ipcss, tucss, tucso;
-
-	ipcso = ipcss = tucss = tucso = 0; 
-	cur = pi->ipi_pidx;
-	hdr_len = ip_off + pi->ipi_ip_hlen;
+	u32                         cmd;
 	
+	cur = pi->ipi_pidx;
+	hdr_len = pi->ipi_ehdrlen + pi->ipi_ip_hlen;
+	cmd = adapter->txd_cmd;
+
+		/*
+		 * The 82574L can only remember the *last* context used
+		 * regardless of queue that it was use for.  We cannot reuse
+		 * contexts on this hardware platform and must generate a new
+		 * context every time.  82574L hardware spec, section 7.2.6,
+		 * second note.
+		 */
+#ifdef notyet	
+	if (DONT_FORCE_CTX &&
+	    adapter->num_tx_queues == 1 &&
+	    txr->csum_lhlen == pi->ipi_ehdrlen &&
+	    txr->csum_iphlen == pi->ipi_ip_hlen &&
+	    txr->csum_flags == csum_flags) {
+		/*
+		 * Same csum offload context as the previous packets;
+		 * just return.
+		 */
+		*txd_upper = txr->csum_txd_upper;
+		*txd_lower = txr->csum_txd_lower;
+		return (cur);
+	}
+#endif	
+
+	TXD = (struct e1000_context_desc *)&txr->tx_base[cur];
 	if (csum_flags & CSUM_IP) {
 	  	*txd_upper |= E1000_TXD_POPTS_IXSM << 8;
-		offload |= CSUM_IP;
-		ipcss = ip_off; 
-		ipcso = ip_off + offsetof(struct ip, ip_sum);
 		/*
 		 * Start offset for header checksum calculation.
 		 * End offset for header checksum calculation.
 		 * Offset of place to put the checksum.
 		 */
-		TXD = (struct e1000_context_desc *)&txr->tx_base[cur];
-		TXD->lower_setup.ip_fields.ipcss = ipcss;
+		TXD->lower_setup.ip_fields.ipcss = pi->ipi_ehdrlen;
 		TXD->lower_setup.ip_fields.ipcse = htole16(hdr_len);
-		TXD->lower_setup.ip_fields.ipcso = ipcso;
+		TXD->lower_setup.ip_fields.ipcso = pi->ipi_ehdrlen + offsetof(struct ip, ip_sum);
 		cmd |= E1000_TXD_CMD_IP;
 	}
 
-	if (csum_flags & CSUM_TCP) {
-	        *txd_lower = E1000_TXD_CMD_DEXT | E1000_TXD_DTYP_D;
+	if (csum_flags & (CSUM_TCP|CSUM_UDP)) {
+		uint8_t tucso;
+
  		*txd_upper |= E1000_TXD_POPTS_TXSM << 8;
- 		offload |= CSUM_TCP;
- 		tucss = hdr_len;
- 		tucso = hdr_len + offsetof(struct tcphdr, th_sum);
-		/*
-		 * The 82574L can only remember the *last* context used
-		 * regardless of queue that it was use for.  We cannot reuse
-		 * contexts on this hardware platform and must generate a new
-		 * context every time.  82574L hardware spec, section 7.2.6,
-		 * second note.
-		 */
-		if (adapter->num_tx_queues < 2) {
- 			/*
- 		 	* Setting up new checksum offload context for every
-			* frames takes a lot of processing time for hardware.
-			* This also reduces performance a lot for small sized
-			* frames so avoid it if driver can use previously
-			* configured checksum offload context.
- 		 	*/
- 			if (txr->last_hw_offload == offload) {
- 				if (offload & CSUM_IP) {
- 					if (txr->last_hw_ipcss == ipcss &&
- 				    	txr->last_hw_ipcso == ipcso &&
- 				    	txr->last_hw_tucss == tucss &&
- 				    	txr->last_hw_tucso == tucso)
-						return (cur);
- 				} else {
- 					if (txr->last_hw_tucss == tucss &&
- 				    	txr->last_hw_tucso == tucso)
-						return (cur);
- 				}
-  			}
- 			txr->last_hw_offload = offload;
- 			txr->last_hw_tucss = tucss;
- 			txr->last_hw_tucso = tucso;
-		}
-		/*
- 		 * Start offset for payload checksum calculation.
- 		 * End offset for payload checksum calculation.
- 		 * Offset of place to put the checksum.
- 		 */
-		TXD = (struct e1000_context_desc *)&txr->tx_base[cur];
+		*txd_lower = E1000_TXD_CMD_DEXT | E1000_TXD_DTYP_D;
+
+		if (csum_flags & CSUM_TCP) {
+			tucso = hdr_len + offsetof(struct tcphdr, th_sum);
+			cmd |= E1000_TXD_CMD_TCP;
+		} else
+			tucso = hdr_len + offsetof(struct udphdr, uh_sum);
  		TXD->upper_setup.tcp_fields.tucss = hdr_len;
  		TXD->upper_setup.tcp_fields.tucse = htole16(0);
  		TXD->upper_setup.tcp_fields.tucso = tucso;
- 		cmd |= E1000_TXD_CMD_TCP;
- 	} else if (csum_flags & CSUM_UDP) {
- 		*txd_lower = E1000_TXD_CMD_DEXT | E1000_TXD_DTYP_D;
- 		*txd_upper |= E1000_TXD_POPTS_TXSM << 8;
- 		tucss = hdr_len;
- 		tucso = hdr_len + offsetof(struct udphdr, uh_sum);
-		/*
-		 * The 82574L can only remember the *last* context used
-		 * regardless of queue that it was use for.  We cannot reuse
-		 * contexts on this hardware platform and must generate a new
-		 * context every time.  82574L hardware spec, section 7.2.6,
-		 * second note.
-		 */
-		if (adapter->num_tx_queues < 2) {
- 			/*
- 		 	* Setting up new checksum offload context for every
-			* frames takes a lot of processing time for hardware.
-			* This also reduces performance a lot for small sized
-			* frames so avoid it if driver can use previously
-			* configured checksum offload context.
- 		 	*/
- 			if (txr->last_hw_offload == offload) {
- 				if (offload & CSUM_IP) {
- 					if (txr->last_hw_ipcss == ipcss &&
- 				    	txr->last_hw_ipcso == ipcso &&
- 				    	txr->last_hw_tucss == tucss &&
- 				    	txr->last_hw_tucso == tucso)
-						return (cur);
-				} else {
-					if (txr->last_hw_tucss == tucss &&
-					    txr->last_hw_tucso == tucso)
-						return (cur);
- 				}
- 			}
- 			txr->last_hw_offload = offload;
- 			txr->last_hw_tucss = tucss;
- 			txr->last_hw_tucso = tucso;
-		}
- 		/*
- 		 * Start offset for header checksum calculation.
- 		 * End offset for header checksum calculation.
- 		 * Offset of place to put the checksum.
- 		 */
-		TXD = (struct e1000_context_desc *)&txr->tx_base[cur];
- 		TXD->upper_setup.tcp_fields.tucss = tucss;
- 		TXD->upper_setup.tcp_fields.tucse = htole16(0);
- 		TXD->upper_setup.tcp_fields.tucso = tucso;
-  	}
-  
- 	if (offload & CSUM_IP) {
- 		txr->last_hw_ipcss = ipcss;
- 		txr->last_hw_ipcso = ipcso;
-  	}
+	}
+
+	txr->csum_lhlen = pi->ipi_ehdrlen;
+	txr->csum_iphlen = pi->ipi_ip_hlen;
+	txr->csum_flags = csum_flags;
+	txr->csum_txd_upper = *txd_upper;
+	txr->csum_txd_lower = *txd_lower;
 
 	TXD->tcp_seg_setup.data = htole32(0);
 	TXD->cmd_and_length =
-		htole32(adapter->txd_cmd | E1000_TXD_CMD_DEXT | cmd);
+		htole32(E1000_TXD_CMD_IFCS | E1000_TXD_CMD_DEXT | cmd);
 
 	tx_buffer = &txr->tx_buffers[cur];
 	tx_buffer->eop = -1;
@@ -262,7 +219,8 @@ em_transmit_checksum_setup(struct adapter *adapter, if_pkt_info_t pi, u32 *txd_u
 	if (++cur == scctx->isc_ntxd[0]) {
 		cur = 0;
 	}
-	device_printf(iflib_get_dev(adapter->ctx), "%s: pidx: %d cur: %d\n", __FUNCTION__, pi->ipi_pidx, cur);
+	device_printf(iflib_get_dev(adapter->ctx), "checksum_setup csum_flags=%x txd_upper=%x txd_lower=%x hdr_len=%d cmd=%x\n",
+		      csum_flags, *txd_upper, *txd_lower, hdr_len, cmd);
 	return (cur);
 }
 
@@ -283,7 +241,6 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	struct e1000_tx_desc *ctxd = NULL;
 	bool do_tso, tso_desc; 
 	
-	MPASS(nsegs > 0);
 	i = first = pi->ipi_pidx;         
 	do_tso = (csum_flags & CSUM_TSO);
 	tso_desc = FALSE;
@@ -319,11 +276,13 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	for (j = 0; j < nsegs; j++) {
 		bus_size_t seg_len;
 		bus_addr_t seg_addr;
+		uint32_t cmd;
 
 		ctxd = &txr->tx_base[i];
 		tx_buffer = &txr->tx_buffers[i];
 		seg_addr = segs[j].ds_addr;
 		seg_len = segs[j].ds_len;
+		cmd = E1000_TXD_CMD_IFCS | sc->txd_cmd;
 
 		/*
 		** TSO Workaround:
@@ -333,7 +292,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 		if (tso_desc && (j == (nsegs - 1)) && (seg_len > 8)) {
 			seg_len -= TSO_WORKAROUND;
 			ctxd->buffer_addr = htole64(seg_addr);
-			ctxd->lower.data = htole32(sc->txd_cmd | txd_lower | seg_len);
+			ctxd->lower.data = htole32(cmd | txd_lower | seg_len);
 			ctxd->upper.data = htole32(txd_upper);
 
                         if (++i == scctx->isc_ntxd[0])
@@ -343,7 +302,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 			ctxd = &txr->tx_base[i];
 			tx_buffer = &txr->tx_buffers[i];
 			ctxd->buffer_addr = htole64(seg_addr + seg_len);
-			ctxd->lower.data = htole32(sc->txd_cmd | txd_lower | TSO_WORKAROUND);
+			ctxd->lower.data = htole32(cmd | txd_lower | TSO_WORKAROUND);
 			ctxd->upper.data = htole32(txd_upper);
 			pidx_last = i;
 			if (++i == scctx->isc_ntxd[0])
@@ -351,7 +310,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 			device_printf(iflib_get_dev(sc->ctx), "TSO path pidx_last=%d i=%d ntxd[0]=%d\n", pidx_last, i, scctx->isc_ntxd[0]);
 		} else {
 			ctxd->buffer_addr = htole64(seg_addr);
-			ctxd->lower.data = htole32(sc->txd_cmd | txd_lower | seg_len);
+			ctxd->lower.data = htole32(cmd | txd_lower | seg_len);
 			ctxd->upper.data = htole32(txd_upper);
 			pidx_last = i;
 			if (++i == scctx->isc_ntxd[0])

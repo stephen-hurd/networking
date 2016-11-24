@@ -341,19 +341,25 @@ struct tx_ring {
 	struct e1000_tx_desc	*tx_base;
 	uint64_t                tx_paddr; 
         struct em_txbuffer	*tx_buffers;
-        volatile u16            tx_avail;
 	u32			tx_tso;		/* last tx was tso */
-        u16			last_hw_offload;
-	u8			last_hw_ipcso;
-	u8			last_hw_ipcss;
-	u8			last_hw_tucso;
-	u8			last_hw_tucss;
 
 	/* Interrupt resources */
 	void                    *tag;
 	struct resource         *res;
         unsigned long		tx_irq;
         unsigned long		no_desc_avail;
+
+	/* Saved csum offloading context information */
+	int			csum_flags;
+	int			csum_lhlen;
+	int			csum_iphlen;
+
+	int			csum_thlen;
+	int			csum_mss;
+	int			csum_pktlen;
+
+	uint32_t		csum_txd_upper;
+	uint32_t		csum_txd_lower; /* last field */
 };
 
 /*
