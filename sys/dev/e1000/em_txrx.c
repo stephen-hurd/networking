@@ -120,7 +120,7 @@ em_tso_setup(struct adapter *adapter, if_pkt_info_t pi, u32 *txd_upper, u32 *txd
 }
 
 #define TSO_WORKAROUND 4
-#define DONT_FORCE_CTX 0
+#define DONT_FORCE_CTX 1
 
 
 /*********************************************************************
@@ -156,14 +156,13 @@ em_transmit_checksum_setup(struct adapter *adapter, if_pkt_info_t pi, u32 *txd_u
 	hdr_len = pi->ipi_ehdrlen + pi->ipi_ip_hlen;
 	cmd = adapter->txd_cmd;
 
-		/*
-		 * The 82574L can only remember the *last* context used
-		 * regardless of queue that it was use for.  We cannot reuse
-		 * contexts on this hardware platform and must generate a new
-		 * context every time.  82574L hardware spec, section 7.2.6,
-		 * second note.
-		 */
-#ifdef notyet	
+	/*
+	 * The 82574L can only remember the *last* context used
+	 * regardless of queue that it was use for.  We cannot reuse
+	 * contexts on this hardware platform and must generate a new
+	 * context every time.  82574L hardware spec, section 7.2.6,
+	 * second note.
+	 */
 	if (DONT_FORCE_CTX &&
 	    adapter->num_tx_queues == 1 &&
 	    txr->csum_lhlen == pi->ipi_ehdrlen &&
@@ -177,7 +176,6 @@ em_transmit_checksum_setup(struct adapter *adapter, if_pkt_info_t pi, u32 *txd_u
 		*txd_lower = txr->csum_txd_lower;
 		return (cur);
 	}
-#endif	
 
 	TXD = (struct e1000_context_desc *)&txr->tx_base[cur];
 	if (csum_flags & CSUM_IP) {
