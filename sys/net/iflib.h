@@ -184,6 +184,8 @@ typedef struct if_softc_ctx {
 	int isc_tx_tso_segments_max;
 	int isc_tx_tso_size_max;
 	int isc_tx_tso_segsize_max;
+	int isc_tx_csum_flags;
+	int isc_capenable;
 	int isc_rss_table_size;
 	int isc_rss_table_mask;
 	int isc_nrxqsets_max;
