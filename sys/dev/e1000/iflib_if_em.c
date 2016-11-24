@@ -456,6 +456,11 @@ em_init_tx_ring(struct em_tx_queue *que)
 	}
 }
 
+#define EM_CAPS								\
+	IFCAP_TSO4 | IFCAP_TXCSUM | IFCAP_LRO | IFCAP_RXCSUM | IFCAP_VLAN_HWFILTER | IFCAP_WOL_MAGIC | \
+	IFCAP_WOL_MCAST | IFCAP_WOL | IFCAP_VLAN_HWTSO | IFCAP_HWCSUM | IFCAP_VLAN_HWTAGGING | \
+	IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO | IFCAP_VLAN_MTU;
+
 /*********************************************************************
  *  Device initialization routine
  *
@@ -529,11 +534,15 @@ em_if_attach_pre(if_ctx_t ctx)
 	em_identify_hardware(ctx);
 
         /* Set isc_msix_bar */
-	scctx->isc_msix_bar = EM_MSIX_BAR;
+	scctx->isc_msix_bar = PCIR_BAR(EM_MSIX_BAR);
 	scctx->isc_tx_nsegments = EM_MAX_SCATTER;
 	scctx->isc_tx_tso_segments_max = scctx->isc_tx_nsegments;
 	scctx->isc_tx_tso_size_max = EM_TSO_SIZE;
 	scctx->isc_tx_tso_segsize_max = EM_TSO_SEG_SIZE;
+
+	scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_IP_TSO;
+
+	scctx->isc_capenable = EM_CAPS;
 	
 	/* Setup PCI resources */
 	if (em_allocate_pci_resources(ctx)) {

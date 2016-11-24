@@ -607,6 +607,10 @@ igb_if_queues_free(if_ctx_t ctx)
  *  return 0 on success, positive on failure
  *********************************************************************/
 
+#define IGB_CAPS  IFCAP_TSO4 | IFCAP_TXCSUM | IFCAP_LRO | IFCAP_RXCSUM | IFCAP_VLAN_HWFILTER | IFCAP_WOL_MAGIC | \
+	IFCAP_WOL_MCAST | IFCAP_WOL | IFCAP_VLAN_HWTSO | IFCAP_HWCSUM | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | \
+	IFCAP_VLAN_HWTSO | IFCAP_VLAN_MTU | IFCAP_TXCSUM_IPV6 | IFCAP_HWCSUM_IPV6 | IFCAP_JUMBO_MTU;
+
 static int
 igb_if_attach_pre(if_ctx_t ctx)
 {
@@ -786,7 +790,11 @@ igb_if_attach_pre(if_ctx_t ctx)
 	scctx->isc_tx_tso_size_max = IGB_TSO_SIZE;
 	scctx->isc_tx_tso_segsize_max = IGB_TSO_SEG_SIZE;
 	scctx->isc_nrxqsets_max = scctx->isc_ntxqsets_max = igb_set_num_queues(ctx);
-	
+
+	scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_TSO | CSUM_IP6_TCP \
+		| CSUM_IP6_UDP | CSUM_IP6_TCP;
+
+	scctx->isc_capenable = IGB_CAPS;
 	return(0);
 
 err_late:
@@ -992,33 +1000,6 @@ igb_if_init(if_ctx_t ctx)
 	igb_if_update_admin_status(ctx); 
 
 	E1000_WRITE_REG(&adapter->hw, E1000_VET, ETHERTYPE_VLAN);
-
-	/* Set hardware offload abilities */
-	ifp->if_hwassist = 0;
-	if (ifp->if_capenable & IFCAP_TXCSUM) {
-#if __FreeBSD_version >= 1000000
-	  ifp->if_hwassist |= (CSUM_IP_TCP | CSUM_IP_UDP);
-	  if (adapter->hw.mac.type != e1000_82575)
-	    ifp->if_hwassist |= CSUM_IP_SCTP;
-#else
-	  ifp->if_hwassist |= (CSUM_TCP | CSUM_UDP);
-#if __FreeBSD_version >= 800000
-	  if (adapter->hw.mac.type != e1000_82575)
-	    ifp->if_hwassist |= CSUM_SCTP;
-#endif
-#endif
-	}
-
-#if __FreeBSD_version >= 1000000
-	if (ifp->if_capenable & IFCAP_TXCSUM_IPV6) {
-		ifp->if_hwassist |= (CSUM_IP6_TCP | CSUM_IP6_UDP);
-		if (adapter->hw.mac.type != e1000_82575)
-			ifp->if_hwassist |= CSUM_IP6_SCTP;
-	}
-#endif
-	
-	if (ifp->if_capenable & IFCAP_TSO)
-		ifp->if_hwassist |= CSUM_TSO;
 
 	/* Clear bad data from Rx FIFOs */
 	e1000_rx_fifo_flush_82575(&adapter->hw);
