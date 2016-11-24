@@ -498,15 +498,6 @@ em_if_attach_pre(if_ctx_t ctx)
 	adapter->media = iflib_get_media(ctx);
         hw = &adapter->hw; 
 
-	scctx->isc_ntxd[0] = 128;
-	scctx->isc_nrxd[0] = 128;
-
-        if (adapter->num_tx_queues > 1)
-		scctx->isc_ntxd[0] = EM_DEFAULT_MULTI_TXD;
-
-	if (adapter->num_rx_queues > 1)
-		scctx->isc_nrxd[0] = EM_DEFAULT_MULTI_RXD;
-
 	scctx->isc_txqsizes[0] = roundup2(scctx->isc_ntxd[0] * sizeof(struct e1000_tx_desc), EM_DBA_ALIGN),
 	scctx->isc_rxqsizes[0] = roundup2(scctx->isc_nrxd[0] * sizeof(union e1000_rx_desc_extended), EM_DBA_ALIGN);
 
