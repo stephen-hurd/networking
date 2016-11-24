@@ -311,6 +311,7 @@ static struct if_shared_ctx em_sctx_init = {
 	.isc_ntxqs = 1,
 	.isc_admin_intrcnt = 1,
 	.isc_vendor_info = em_vendor_info_array,
+	.isc_driver_version = em_driver_version,
 	.isc_txrx = &em_txrx,
 	.isc_driver = &em_if_driver,
 
@@ -334,16 +335,7 @@ if_shared_ctx_t em_sctx = &em_sctx_init;
 static int em_get_regs(SYSCTL_HANDLER_ARGS)
 {
 	struct adapter *adapter = (struct adapter *)arg1;
-	if_softc_ctx_t scctx = adapter->shared;
 	struct e1000_hw *hw = &adapter->hw;
-
-	struct em_tx_queue *tx_que = &adapter->tx_queues[0];
-	struct em_rx_queue *rx_que = &adapter->rx_queues[0];
-	struct rx_ring *rxr = &rx_que->rxr;
-	struct tx_ring *txr = &tx_que->txr;
-	int ntxd = scctx->isc_ntxd[0];
-	int nrxd = scctx->isc_nrxd[0];
-	int j;
 
 	struct sbuf *sb;
 	u32 *regs_buff = (u32 *)malloc(sizeof(u32) * IGB_REGS_LEN, M_DEVBUF, M_NOWAIT);
@@ -415,6 +407,15 @@ static int em_get_regs(SYSCTL_HANDLER_ARGS)
 	sbuf_printf(sb, "\tTDFHS\t %08x\n", regs_buff[20]);
 	sbuf_printf(sb, "\tTDFPC\t %08x\n\n", regs_buff[21]); 
 
+#ifdef DUMP_DESCS
+	{
+		if_softc_ctx_t scctx = adapter->shared;
+		struct rx_ring *rxr = &rx_que->rxr;
+		struct tx_ring *txr = &tx_que->txr;
+		int ntxd = scctx->isc_ntxd[0];
+		int nrxd = scctx->isc_nrxd[0];
+		int j;
+
 	for (j = 0; j < nrxd; j++) {
 		u32 staterr = le32toh(rxr->rx_base[j].wb.upper.status_error);
 		u32 length =  le32toh(rxr->rx_base[j].wb.upper.length);
@@ -430,6 +431,8 @@ static int em_get_regs(SYSCTL_HANDLER_ARGS)
 			    buf->eop != -1 ? txr->tx_base[buf->eop].upper.fields.status & E1000_TXD_STAT_DD : 0);
 
 	}
+	}
+#endif	
 	
         rc = sbuf_finish(sb);
 	sbuf_delete(sb);
@@ -1994,7 +1997,6 @@ em_initialize_transmit_unit(if_ctx_t ctx)
 		/* Clear checksum offload context. */
 		offp = (caddr_t)&txr->csum_flags;
 		endp = (caddr_t)(txr + 1);
-		printf("bzeroing %ld\n", endp - offp);
 		bzero(offp, endp - offp);
 
 		/* Base and Len of TX Ring */
@@ -2250,7 +2252,6 @@ em_initialize_receive_unit(if_ctx_t ctx)
 		E1000_WRITE_REG(hw, E1000_RDBAL(i), (u32)bus_addr);
 		/* Setup the Head and Tail Descriptor Pointers */
 		E1000_WRITE_REG(hw, E1000_RDH(i), 0);
-		device_printf(iflib_get_dev(ctx), "set tail of queue %d to zero\n", i);
 		E1000_WRITE_REG(hw, E1000_RDT(i), 0);
 	}
 
@@ -2385,9 +2386,7 @@ em_if_disable_intr(if_ctx_t ctx)
 
 	if (hw->mac.type == e1000_82574)
 		E1000_WRITE_REG(hw, EM_EIAC, 0);
-	device_printf(iflib_get_dev(ctx), "/* Manually turn off all interrupts */\n");
 	E1000_WRITE_REG(&adapter->hw, E1000_IMC, 0xffffffff);
-	device_printf(iflib_get_dev(ctx), "%s\n", __FUNCTION__);
 }
 
 /*

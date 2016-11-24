@@ -10,6 +10,12 @@
 #include <netinet/in_rss.h>
 #endif
 
+#ifdef VERBOSE_DEBUG
+#define DPRINTF device_printf
+#else
+#define DPRINTF(...)
+#endif
+
 /*********************************************************************
  *  Local Function prototypes
  *********************************************************************/
@@ -109,7 +115,7 @@ em_tso_setup(struct adapter *adapter, if_pkt_info_t pi, u32 *txd_upper, u32 *txd
 	if (++cur == scctx->isc_ntxd[0]) {
 		cur = 0;
 	}
-	device_printf(iflib_get_dev(adapter->ctx), "%s: pidx: %d cur: %d\n", __FUNCTION__, pi->ipi_pidx, cur);
+	DPRINTF(iflib_get_dev(adapter->ctx), "%s: pidx: %d cur: %d\n", __FUNCTION__, pi->ipi_pidx, cur);
 	return (cur);
 }
 
@@ -219,7 +225,7 @@ em_transmit_checksum_setup(struct adapter *adapter, if_pkt_info_t pi, u32 *txd_u
 	if (++cur == scctx->isc_ntxd[0]) {
 		cur = 0;
 	}
-	device_printf(iflib_get_dev(adapter->ctx), "checksum_setup csum_flags=%x txd_upper=%x txd_lower=%x hdr_len=%d cmd=%x\n",
+	DPRINTF(iflib_get_dev(adapter->ctx), "checksum_setup csum_flags=%x txd_upper=%x txd_lower=%x hdr_len=%d cmd=%x\n",
 		      csum_flags, *txd_upper, *txd_lower, hdr_len, cmd);
 	return (cur);
 }
@@ -271,7 +277,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
                 txd_lower |= htole32(E1000_TXD_CMD_VLE);
 	}
 
-	device_printf(iflib_get_dev(sc->ctx), "encap: set up tx: nsegs=%d first=%d i=%d\n", nsegs, first, i);
+	DPRINTF(iflib_get_dev(sc->ctx), "encap: set up tx: nsegs=%d first=%d i=%d\n", nsegs, first, i);
 	/* Set up our transmit descriptors */
 	for (j = 0; j < nsegs; j++) {
 		bus_size_t seg_len;
@@ -307,7 +313,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 			pidx_last = i;
 			if (++i == scctx->isc_ntxd[0])
 				i = 0;
-			device_printf(iflib_get_dev(sc->ctx), "TSO path pidx_last=%d i=%d ntxd[0]=%d\n", pidx_last, i, scctx->isc_ntxd[0]);
+			DPRINTF(iflib_get_dev(sc->ctx), "TSO path pidx_last=%d i=%d ntxd[0]=%d\n", pidx_last, i, scctx->isc_ntxd[0]);
 		} else {
 			ctxd->buffer_addr = htole64(seg_addr);
 			ctxd->lower.data = htole32(cmd | txd_lower | seg_len);
@@ -315,7 +321,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 			pidx_last = i;
 			if (++i == scctx->isc_ntxd[0])
 				i = 0;
-			device_printf(iflib_get_dev(sc->ctx), "pidx_last=%d i=%d ntxd[0]=%d\n", pidx_last, i, scctx->isc_ntxd[0]);
+			DPRINTF(iflib_get_dev(sc->ctx), "pidx_last=%d i=%d ntxd[0]=%d\n", pidx_last, i, scctx->isc_ntxd[0]);
 		}
 		tx_buffer->eop = -1;
 	}
@@ -330,7 +336,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 
 	tx_buffer = &txr->tx_buffers[first];
 	tx_buffer->eop = pidx_last;
-	device_printf(iflib_get_dev(sc->ctx), "tx_buffers[%d]->eop = %d ipi_new_pidx=%d\n", first, pidx_last, i);
+	DPRINTF(iflib_get_dev(sc->ctx), "tx_buffers[%d]->eop = %d ipi_new_pidx=%d\n", first, pidx_last, i);
 	pi->ipi_new_pidx = i;
 
 	return (0); 
@@ -365,7 +371,7 @@ em_isc_txd_credits_update(void *arg, uint16_t txqid, uint32_t cidx_init, bool cl
         last = buf->eop;
 	eop_desc = &txr->tx_base[last];
 
-	device_printf(iflib_get_dev(adapter->ctx), "credits_update: cidx_init=%d clear=%d last=%d\n",
+	DPRINTF(iflib_get_dev(adapter->ctx), "credits_update: cidx_init=%d clear=%d last=%d\n",
 		      cidx_init, clear, last);
 	/*
 	 * What this does is get the index of the
@@ -409,7 +415,7 @@ em_isc_txd_credits_update(void *arg, uint16_t txqid, uint32_t cidx_init, bool cl
 		done = last;
 	}
 
-	device_printf(iflib_get_dev(adapter->ctx), "Processed %d credits update\n", processed); 
+	DPRINTF(iflib_get_dev(adapter->ctx), "Processed %d credits update\n", processed);
 	return(processed);
 }
 
