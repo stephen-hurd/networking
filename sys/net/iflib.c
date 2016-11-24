@@ -1838,22 +1838,25 @@ static void
 iflib_init_locked(if_ctx_t ctx)
 {
 	if_softc_ctx_t sctx = &ctx->ifc_softc_ctx;
+	if_softc_ctx_t scctx = &ctx->ifc_softc_ctx;
 	if_t ifp = ctx->ifc_ifp;
 	iflib_fl_t fl;
 	iflib_txq_t txq;
 	iflib_rxq_t rxq;
-	int i, j;
+	int i, j, tx_ip_csum_flags, tx_ip6_csum_flags;
 
 
 	if_setdrvflagbits(ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
 	IFDI_INTR_DISABLE(ctx);
 
+	tx_ip_csum_flags = scctx->isc_tx_csum_flags & (CSUM_IP | CSUM_TCP | CSUM_UDP | CSUM_SCTP);
+	tx_ip6_csum_flags = scctx->isc_tx_csum_flags & (CSUM_IP6_TCP | CSUM_IP6_UDP | CSUM_IP6_SCTP);
 	/* Set hardware offload abilities */
 	if_clearhwassist(ifp);
 	if (if_getcapenable(ifp) & IFCAP_TXCSUM)
-		if_sethwassistbits(ifp, CSUM_IP | CSUM_TCP | CSUM_UDP, 0);
+		if_sethwassistbits(ifp, tx_ip_csum_flags, 0);
 	if (if_getcapenable(ifp) & IFCAP_TXCSUM_IPV6)
-		if_sethwassistbits(ifp,  (CSUM_TCP_IPV6 | CSUM_UDP_IPV6), 0);
+		if_sethwassistbits(ifp,  tx_ip6_csum_flags, 0);
 	if (if_getcapenable(ifp) & IFCAP_TSO4)
 		if_sethwassistbits(ifp, CSUM_IP_TSO, 0);
 	if (if_getcapenable(ifp) & IFCAP_TSO6)
@@ -3537,6 +3540,8 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 	iflib_add_device_sysctl_pre(ctx);
 
 	scctx = &ctx->ifc_softc_ctx;
+	ifp = ctx->ifc_ifp;
+
 	/*
 	 * XXX sanity check that ntxd & nrxd are a power of 2
 	 */
@@ -3589,6 +3594,16 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 		device_printf(dev, "IFDI_ATTACH_PRE failed %d\n", err);
 		return (err);
 	}
+
+#ifdef INVARIANTS
+	MPASS(scctx->isc_capenable);
+	if (scctx->isc_capenable & IFCAP_TXCSUM)
+		MPASS(scctx->isc_tx_csum_flags);
+#endif
+
+	if_setcapabilities(ifp, scctx->isc_capenable);
+	if_setcapenable(ifp, scctx->isc_capenable);
+
 	if (scctx->isc_ntxqsets_max)
 		scctx->isc_ntxqsets = min(scctx->isc_ntxqsets, scctx->isc_ntxqsets_max);
 	if (scctx->isc_nrxqsets_max)
@@ -3600,8 +3615,6 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 #endif
 
 	msix_bar = scctx->isc_msix_bar;
-
-	ifp = ctx->ifc_ifp;
 
 	if(sctx->isc_flags & IFLIB_HAS_TXCQ)
 		main_txq = 1;
@@ -3973,10 +3986,6 @@ _iflib_assert(if_shared_ctx_t sctx)
 	MPASS(sctx->isc_ntxd_default[0]);
 }
 
-#define DEFAULT_CAPS (IFCAP_TXCSUM_IPV6 | IFCAP_RXCSUM_IPV6 | IFCAP_HWCSUM | IFCAP_LRO | \
-		     IFCAP_TSO4 | IFCAP_TSO6 | IFCAP_VLAN_HWTAGGING |	\
-		     IFCAP_VLAN_MTU | IFCAP_VLAN_HWFILTER | IFCAP_VLAN_HWTSO | IFCAP_HWSTATS)
-
 static int
 iflib_register(if_ctx_t ctx)
 {
@@ -4010,10 +4019,6 @@ iflib_register(if_ctx_t ctx)
 	if_settransmitfn(ifp, iflib_if_transmit);
 	if_setqflushfn(ifp, iflib_if_qflush);
 	if_setflags(ifp, IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST);
-
-	/* XXX - move this in to the driver for non-default settings */
-	if_setcapabilities(ifp, DEFAULT_CAPS);
-	if_setcapenable(ifp, DEFAULT_CAPS);
 
 	ctx->ifc_vlan_attach_event =
 		EVENTHANDLER_REGISTER(vlan_config, iflib_vlan_register, ctx,
