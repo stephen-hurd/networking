@@ -1104,7 +1104,6 @@ static void
 igb_enable_queue(struct adapter *adapter, struct igb_rx_queue *que)
 {
 	E1000_WRITE_REG(&adapter->hw, E1000_EIMS, que->eims);
-	device_printf(iflib_get_dev(adapter->ctx), "eims %x\n", que->eims);
 }
 
 
@@ -1718,7 +1717,6 @@ igb_configure_queues(struct adapter *adapter)
 			u32 index = i >> 1;
 			ivar = E1000_READ_REG_ARRAY(hw, E1000_IVAR0, index);
 			rx_que = &adapter->rx_queues[i];
-			printf("rx_que->msix %d\n", rx_que->msix); 
 			if (i & 1) {
 				ivar &= 0xFF00FFFF;
 				ivar |= (rx_que->msix | E1000_IVAR_VALID) << 16;
@@ -1726,7 +1724,6 @@ igb_configure_queues(struct adapter *adapter)
 				ivar &= 0xFFFFFF00;
 				ivar |= rx_que->msix | E1000_IVAR_VALID;
 			}
-			printf("RX ivar %x\n", ivar);
 			E1000_WRITE_REG_ARRAY(hw, E1000_IVAR0, index, ivar);
 		}
 		/* TX entries */
@@ -1734,7 +1731,6 @@ igb_configure_queues(struct adapter *adapter)
 			u32 index = i >> 1;
 			ivar = E1000_READ_REG_ARRAY(hw, E1000_IVAR0, index);
 			tx_que = &adapter->tx_queues[i];
-			printf("tx_que->msix %d\n", tx_que->msix);
 			if (i & 1) {
 				ivar &= 0x00FFFFFF;
 				ivar |= (tx_que->msix | E1000_IVAR_VALID) << 24;
@@ -1742,7 +1738,6 @@ igb_configure_queues(struct adapter *adapter)
 				ivar &= 0xFFFF00FF;
 				ivar |= (tx_que->msix | E1000_IVAR_VALID) << 8;
 			}
-			printf("TX ivar %x\n", ivar);
 			E1000_WRITE_REG_ARRAY(hw, E1000_IVAR0, index, ivar);
 			adapter->que_mask |= tx_que->eims;
 		}
@@ -2618,7 +2613,6 @@ igb_if_enable_intr(if_ctx_t ctx)
 	if (adapter->intr_type == IFLIB_INTR_MSIX) {
 		u32 mask = (adapter->que_mask | adapter->link_mask);
 
-		device_printf(iflib_get_dev(ctx), "enable_mask:%x\n", mask);
 		E1000_WRITE_REG(&adapter->hw, E1000_EIAC, mask);
 		E1000_WRITE_REG(&adapter->hw, E1000_EIAM, mask);
 		E1000_WRITE_REG(&adapter->hw, E1000_EIMS, mask);
