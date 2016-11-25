@@ -316,6 +316,7 @@ static struct if_shared_ctx em_sctx_init = {
 	.isc_driver_version = em_driver_version,
 	.isc_txrx = &em_txrx,
 	.isc_driver = &em_if_driver,
+	.isc_flags = IFLIB_NEED_SCRATCH,
 
 	.isc_nrxd_min = {EM_MIN_RXD},
 	.isc_ntxd_min = {EM_MIN_TXD},
