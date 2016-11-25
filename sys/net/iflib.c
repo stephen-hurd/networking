@@ -2696,7 +2696,11 @@ defrag:
 			ndesc += txq->ift_size;
 			txq->ift_gen = 1;
 		}
-		MPASS(ndesc <= pi.ipi_nsegs + 1);
+		/*
+		 * drivers can need as many as 
+		 * two sentinels
+		 */
+		MPASS(ndesc <= pi.ipi_nsegs + 2);
 		MPASS(pi.ipi_new_pidx != pidx);
 		MPASS(ndesc > 0);
 		txq->ift_in_use += ndesc;
