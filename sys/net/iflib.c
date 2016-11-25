@@ -3607,10 +3607,10 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 	if_setcapabilities(ifp, scctx->isc_capenable);
 	if_setcapenable(ifp, scctx->isc_capenable);
 
-	if (scctx->isc_ntxqsets_max)
-		scctx->isc_ntxqsets = min(scctx->isc_ntxqsets, scctx->isc_ntxqsets_max);
-	if (scctx->isc_nrxqsets_max)
-		scctx->isc_nrxqsets = min(scctx->isc_nrxqsets, scctx->isc_nrxqsets_max);
+	if (scctx->isc_ntxqsets == 0 || (scctx->isc_ntxqsets_max && scctx->isc_ntxqsets_max < scctx->isc_ntxqsets))
+		scctx->isc_ntxqsets = scctx->isc_ntxqsets_max;
+	if (scctx->isc_nrxqsets == 0 || (scctx->isc_nrxqsets_max && scctx->isc_nrxqsets_max < scctx->isc_nrxqsets))
+		scctx->isc_nrxqsets = scctx->isc_nrxqsets_max;
 
 #ifdef ACPI_DMAR
 	if (dmar_get_dma_tag(device_get_parent(dev), dev) != NULL)
