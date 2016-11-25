@@ -459,6 +459,26 @@ em_init_tx_ring(struct em_tx_queue *que)
 	}
 }
 
+static int
+em_set_num_queues(if_ctx_t ctx)
+{
+	struct adapter *adapter = iflib_get_softc(ctx);
+	int maxqueues = adapter->rx_num_queues;
+
+	/* Sanity check based on HW */
+	switch (adapter->hw.mac.type) {
+		case e1000_82574:
+			maxqueues = 2;
+			break;
+		default
+			maxqueues = 1;
+			break;
+	}
+
+	return (maxqueues);
+}
+
+
 #define EM_CAPS								\
 	IFCAP_TSO4 | IFCAP_TXCSUM | IFCAP_LRO | IFCAP_RXCSUM | IFCAP_VLAN_HWFILTER | IFCAP_WOL_MAGIC | \
 	IFCAP_WOL_MCAST | IFCAP_WOL | IFCAP_VLAN_HWTSO | IFCAP_HWCSUM | IFCAP_VLAN_HWTAGGING | \
@@ -533,6 +553,7 @@ em_if_attach_pre(if_ctx_t ctx)
 	scctx->isc_tx_tso_segments_max = scctx->isc_tx_nsegments;
 	scctx->isc_tx_tso_size_max = EM_TSO_SIZE;
 	scctx->isc_tx_tso_segsize_max = EM_TSO_SEG_SIZE;
+	scctx->isc_nrxqsets_max = scctx->isc_ntxqsets_max = em_set_num_queues(ctx);
 
 	scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_IP_TSO;
 
@@ -1536,8 +1557,8 @@ em_if_msix_intr_assign(if_ctx_t ctx, int msix)
         error = iflib_irq_alloc_generic(ctx, &adapter->irq, rid, IFLIB_INTR_ADMIN, em_msix_link, adapter, 0, "aq");
 
 	if (error) {
-	  device_printf(iflib_get_dev(ctx), "Failed to register admin handler");
-	  goto fail;
+		device_printf(iflib_get_dev(ctx), "Failed to register admin handler");
+		goto fail;
 	}
 	
 	adapter->linkvec = vector;
