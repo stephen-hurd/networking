@@ -4700,6 +4700,8 @@ iflib_msix_init(if_ctx_t ctx)
 	iflib_num_tx_queues = scctx->isc_ntxqsets;
 	iflib_num_rx_queues = scctx->isc_nrxqsets;
 
+	device_printf(dev, "msix_init qsets capped at %d\n", iflib_num_tx_queues);
+	
 	bar = ctx->ifc_softc_ctx.isc_msix_bar;
 	admincnt = sctx->isc_admin_intrcnt;
 	/* Override by tuneable */
