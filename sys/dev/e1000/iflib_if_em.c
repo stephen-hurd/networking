@@ -463,14 +463,14 @@ static int
 em_set_num_queues(if_ctx_t ctx)
 {
 	struct adapter *adapter = iflib_get_softc(ctx);
-	int maxqueues = adapter->rx_num_queues;
+	int maxqueues;
 
 	/* Sanity check based on HW */
 	switch (adapter->hw.mac.type) {
 		case e1000_82574:
 			maxqueues = 2;
 			break;
-		default
+		default:
 			maxqueues = 1;
 			break;
 	}
