@@ -10,6 +10,13 @@
 #include <netinet/in_rss.h>
 #endif
 
+#ifdef VERBOSE_DEBUG
+#define DPRINTF device_printf
+#else
+#define DPRINTF(...)
+#endif
+
+
 /*********************************************************************
  *  Local Function prototypes
  *********************************************************************/
@@ -125,7 +132,7 @@ igb_tso_setup(struct tx_ring *txr, if_pkt_info_t pi, u32 *cmd_type_len, u32 *oli
   
         ++txr->tso_tx; 
 
-        return 0;  
+        return (1);
 }
 
 /*********************************************************************
@@ -159,9 +166,9 @@ igb_tx_ctx_setup(struct tx_ring *txr, if_pkt_info_t pi, u32 *cmd_type_len, u32 *
 	** we need to make one even if not doing offloads.
 	*/
         if (pi->ipi_mflags & M_VLANTAG) {
-	    vlan_macip_lens |= (pi->ipi_vtag << E1000_ADVTXD_VLAN_SHIFT);
-	} else if (pi->ipi_csum_flags & CSUM_OFFLOAD) {
-	    return (0); 
+		vlan_macip_lens |= (pi->ipi_vtag << E1000_ADVTXD_VLAN_SHIFT);
+	} else if ((pi->ipi_csum_flags & CSUM_OFFLOAD) == 0) {
+		return (0);
 	}
 	
 	/* Set the ether header length */
@@ -228,7 +235,7 @@ igb_tx_ctx_setup(struct tx_ring *txr, if_pkt_info_t pi, u32 *cmd_type_len, u32 *
 	TXD->seqnum_seed = htole32(0);
 	TXD->mss_l4len_idx = htole32(mss_l4len_idx);
 	
-	return (0);
+	return (1);
 }
 
 static int
@@ -256,10 +263,9 @@ igb_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	first = i = pi->ipi_pidx;
 
 	/* Consume the first descriptor */
-        igb_tx_ctx_setup(txr, pi, &cmd_type_len, &olinfo_status);
-        if (++i == scctx->isc_ntxd[0]) {
-	  i = 0;
-	}
+        i += igb_tx_ctx_setup(txr, pi, &cmd_type_len, &olinfo_status);
+        if (i == scctx->isc_ntxd[0])
+		i = 0;
 	
 	/* 82575 needs the queue index added */
 	if (sc->hw.mac.type == e1000_82575)
@@ -377,9 +383,10 @@ igb_isc_txd_credits_update(void *arg, uint16_t txqid, uint32_t cidx_init, bool c
 	return (processed);
 }
 
-static void igb_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
-			       uint32_t pidx, uint64_t *paddrs, caddr_t *vaddrs __unused,
-			       uint16_t count, uint16_t buf_len __unused)
+static void
+igb_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
+		   uint32_t pidx, uint64_t *paddrs, caddr_t *vaddrs __unused,
+		   uint16_t count, uint16_t buf_len __unused)
 {
 	struct adapter *sc           = arg;
 	if_softc_ctx_t scctx         = sc->shared; 
@@ -395,16 +402,18 @@ static void igb_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
 	}
 }
 
-static void igb_isc_rxd_flush(void *arg, uint16_t rxqid, uint8_t flid __unused, uint32_t pidx)
+static void
+igb_isc_rxd_flush(void *arg, uint16_t rxqid, uint8_t flid __unused, uint32_t pidx)
 {
 	struct adapter *sc           = arg;
 	struct igb_rx_queue *que     = &sc->rx_queues[rxqid];
 	struct rx_ring *rxr          = &que->rxr;
 
-         E1000_WRITE_REG(&sc->hw, E1000_RDT(rxr->me), pidx);
+	E1000_WRITE_REG(&sc->hw, E1000_RDT(rxr->me), pidx);
 }
 
-static int igb_isc_rxd_available(void *arg, uint16_t rxqid, uint32_t idx, int budget)
+static int
+igb_isc_rxd_available(void *arg, uint16_t rxqid, uint32_t idx, int budget)
 {
 	struct adapter *sc           = arg;
 	if_softc_ctx_t scctx         = sc->shared; 
@@ -434,7 +443,7 @@ static int igb_isc_rxd_available(void *arg, uint16_t rxqid, uint32_t idx, int bu
 		int rdt, rdh;
 		rdt = E1000_READ_REG(hw, E1000_RDT(rxr->me));
 		rdh = E1000_READ_REG(hw, E1000_RDH(rxr->me));
-		device_printf(iflib_get_dev(sc->ctx), "sidx:%d eidx:%d iter=%d pktcnt=%d RDT=%d RDH=%d\n", idx, i, iter, cnt, rdt, rdh);
+		DPRINTF(iflib_get_dev(sc->ctx), "sidx:%d eidx:%d iter=%d pktcnt=%d RDT=%d RDH=%d\n", idx, i, iter, cnt, rdt, rdh);
 	}
 	return (cnt);
 }
