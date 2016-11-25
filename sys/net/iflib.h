@@ -258,20 +258,23 @@ typedef enum {
 /*
  * Interface has a separate command queue for RX
  */
-#define IFLIB_HAS_RXCQ		0x1
+#define IFLIB_HAS_RXCQ		0x01
 /*
  * Driver has already allocated vectors
  */
-#define IFLIB_SKIP_MSIX		0x2
-
+#define IFLIB_SKIP_MSIX		0x02
 /*
  * Interface is a virtual function
  */
-#define IFLIB_IS_VF		0x4
+#define IFLIB_IS_VF		0x04
 /*
  * Interface has a separate command queue for TX
  */
-#define IFLIB_HAS_TXCQ		0x8
+#define IFLIB_HAS_TXCQ		0x08
+/*
+ * Interface does checksum in place
+ */
+#define IFLIB_NEED_SCRATCH	0x10
 
 
 /*

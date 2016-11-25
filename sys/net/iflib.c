@@ -2266,6 +2266,7 @@ print_pkt(if_pkt_info_t pi)
 static int
 iflib_parse_header(iflib_txq_t txq, if_pkt_info_t pi, struct mbuf **mp)
 {
+	if_shared_ctx_t sctx = txq->ift_ctx->ifc_sctx;
 	struct ether_vlan_header *eh;
 	struct mbuf *m, *n;
 
@@ -2403,10 +2404,14 @@ iflib_parse_header(iflib_txq_t txq, if_pkt_info_t pi, struct mbuf **mp)
 		pi->ipi_ip_hlen = 0;
 		break;
 	}
+	if ((sctx->isc_flags & IFLIB_NEED_SCRATCH) &&
+	    M_WRITABLE(m) == 0 &&
+	    (m = m_dup(m, M_NOWAIT)) == NULL)
+		return (ENOMEM);
 	*mp = m;
+
 	return (0);
 }
-
 
 static  __noinline  struct mbuf *
 collapse_pkthdr(struct mbuf *m0)
