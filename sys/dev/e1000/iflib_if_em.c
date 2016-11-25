@@ -126,6 +126,7 @@ static void	em_initialize_receive_unit(if_ctx_t ctx);
 
 static void	em_if_enable_intr(if_ctx_t ctx); 
 static void	em_if_disable_intr(if_ctx_t ctx);
+static int      em_if_queue_intr_enable(if_ctx_t ctx, uint16_t rxqid);
 static void     em_if_multi_set(if_ctx_t ctx);
 static void     em_if_update_admin_status(if_ctx_t ctx);
 static void	em_update_stats_counters(struct adapter *);
@@ -221,6 +222,7 @@ static device_method_t em_if_methods[] = {
 	DEVMETHOD(ifdi_vlan_unregister, em_if_vlan_unregister),
 	DEVMETHOD(ifdi_get_counter, em_if_get_counter),
 	DEVMETHOD(ifdi_led_func, em_if_led_func),
+	DEVMETHOD(ifdi_queue_intr_enable, em_if_queue_intr_enable),
 	DEVMETHOD_END
 };
 
@@ -554,6 +556,7 @@ em_if_attach_pre(if_ctx_t ctx)
 	scctx->isc_tx_tso_size_max = EM_TSO_SIZE;
 	scctx->isc_tx_tso_segsize_max = EM_TSO_SEG_SIZE;
 	scctx->isc_nrxqsets_max = scctx->isc_ntxqsets_max = em_set_num_queues(ctx);
+	device_printf(dev, "attach_pre capping queues at %d\n", scctx->isc_ntxqsets_max);
 
 	scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_IP_TSO;
 
@@ -1036,6 +1039,22 @@ skip_stray:
 		adapter->rx_overruns++;
 
 	return (FILTER_SCHEDULE_THREAD); 
+}
+
+static void
+em_enable_queue(struct adapter *adapter, struct rx_ring *rxr)
+{
+	E1000_WRITE_REG(&adapter->hw, E1000_IMS, rxr->ims);
+}
+
+static int
+em_if_queue_intr_enable(if_ctx_t ctx, uint16_t rxqid)
+{
+        struct adapter	*adapter = iflib_get_softc(ctx);
+	struct rx_ring *rxr = &adapter->rx_queues[rxqid].rxr;
+
+	em_enable_queue(adapter, rxr);
+	return (0);
 }
 
 /*********************************************************************
@@ -1532,7 +1551,7 @@ em_if_msix_intr_assign(if_ctx_t ctx, int msix)
 		adapter->ivars |= (8 | rxr->msix) << (i * 4);
 	}
 
-	for (i = 0; i < adapter->num_tx_queues; i++, tx_que++, vector++) {
+	for (i = 0; i < adapter->num_tx_queues; i++, tx_que++) {
 		struct tx_ring *txr = &tx_que->txr;
 		rid = vector + 1;
 		snprintf(buf, sizeof(buf), "txq%d", i);
@@ -1611,11 +1630,8 @@ em_setup_msix(if_ctx_t ctx)
 {
 	struct adapter *adapter = iflib_get_softc(ctx);
 
-	if ((adapter->hw.mac.type == e1000_82574) &&
-	    (adapter->intr_type == IFLIB_INTR_MSIX)) {
-		if (adapter->num_tx_queues > 1) {
-			em_enable_vectors_82574(ctx);
-		}
+	if (adapter->hw.mac.type == e1000_82574) {
+		em_enable_vectors_82574(ctx);
 	}
 	return (0);
 }
