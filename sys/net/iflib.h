@@ -278,7 +278,7 @@ typedef enum {
 /*
  * Interface doesn't expect in_pseudo for th_sum
  */
-#define IFLIB_SKIP_IN_PSEUDO	0x20
+#define IFLIB_TSO_INIT_IP	0x20
 
 
 

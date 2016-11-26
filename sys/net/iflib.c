@@ -2361,10 +2361,13 @@ iflib_parse_header(iflib_txq_t txq, if_pkt_info_t pi, struct mbuf **mp)
 		if (IS_TSO4(pi)) {
 			if (__predict_false(ip->ip_p != IPPROTO_TCP))
 				return (ENXIO);
-			if ((sctx->isc_flags & IFLIB_SKIP_IN_PSEUDO) == 0)
-				th->th_sum = in_pseudo(ip->ip_src.s_addr,
-						       ip->ip_dst.s_addr, htons(IPPROTO_TCP));
+			th->th_sum = in_pseudo(ip->ip_src.s_addr,
+					       ip->ip_dst.s_addr, htons(IPPROTO_TCP));
 			pi->ipi_tso_segsz = m->m_pkthdr.tso_segsz;
+			if (sctx->isc_flags & IFLIB_TSO_INIT_IP) {
+				ip->ip_sum = 0;
+				ip->ip_len = htons(pi->ipi_ip_hlen + pi->ipi_tcp_hlen + pi->ipi_tso_segsz);
+			}
 		}
 		break;
 	}
@@ -2404,8 +2407,7 @@ iflib_parse_header(iflib_txq_t txq, if_pkt_info_t pi, struct mbuf **mp)
 			 * So, set it here because the rest of the flow requires it.
 			 */
 			pi->ipi_csum_flags |= CSUM_TCP_IPV6;
-			if ((sctx->isc_flags & IFLIB_SKIP_IN_PSEUDO) == 0)
-				th->th_sum = in6_cksum_pseudo(ip6, 0, IPPROTO_TCP, 0);
+			th->th_sum = in6_cksum_pseudo(ip6, 0, IPPROTO_TCP, 0);
 			pi->ipi_tso_segsz = m->m_pkthdr.tso_segsz;
 		}
 		break;
