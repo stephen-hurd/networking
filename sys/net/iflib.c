@@ -2271,6 +2271,16 @@ iflib_parse_header(iflib_txq_t txq, if_pkt_info_t pi, struct mbuf **mp)
 	struct mbuf *m, *n;
 
 	n = m = *mp;
+	if ((sctx->isc_flags & IFLIB_NEED_SCRATCH) &&
+	    M_WRITABLE(m) == 0) {
+		if ((m = m_dup(m, M_NOWAIT)) == NULL) {
+			return (ENOMEM);
+		} else {
+			m_freem(*mp);
+			n = *mp = m;
+		}
+	}
+
 	/*
 	 * Determine where frame payload starts.
 	 * Jump over vlan headers if already present,
@@ -2351,8 +2361,9 @@ iflib_parse_header(iflib_txq_t txq, if_pkt_info_t pi, struct mbuf **mp)
 		if (IS_TSO4(pi)) {
 			if (__predict_false(ip->ip_p != IPPROTO_TCP))
 				return (ENXIO);
-			th->th_sum = in_pseudo(ip->ip_src.s_addr,
-					       ip->ip_dst.s_addr, htons(IPPROTO_TCP));
+			if ((sctx->isc_flags & IFLIB_SKIP_IN_PSEUDO) == 0)
+				th->th_sum = in_pseudo(ip->ip_src.s_addr,
+						       ip->ip_dst.s_addr, htons(IPPROTO_TCP));
 			pi->ipi_tso_segsz = m->m_pkthdr.tso_segsz;
 		}
 		break;
@@ -2393,7 +2404,8 @@ iflib_parse_header(iflib_txq_t txq, if_pkt_info_t pi, struct mbuf **mp)
 			 * So, set it here because the rest of the flow requires it.
 			 */
 			pi->ipi_csum_flags |= CSUM_TCP_IPV6;
-			th->th_sum = in6_cksum_pseudo(ip6, 0, IPPROTO_TCP, 0);
+			if ((sctx->isc_flags & IFLIB_SKIP_IN_PSEUDO) == 0)
+				th->th_sum = in6_cksum_pseudo(ip6, 0, IPPROTO_TCP, 0);
 			pi->ipi_tso_segsz = m->m_pkthdr.tso_segsz;
 		}
 		break;
@@ -2404,10 +2416,6 @@ iflib_parse_header(iflib_txq_t txq, if_pkt_info_t pi, struct mbuf **mp)
 		pi->ipi_ip_hlen = 0;
 		break;
 	}
-	if ((sctx->isc_flags & IFLIB_NEED_SCRATCH) &&
-	    M_WRITABLE(m) == 0 &&
-	    (m = m_dup(m, M_NOWAIT)) == NULL)
-		return (ENOMEM);
 	*mp = m;
 
 	return (0);

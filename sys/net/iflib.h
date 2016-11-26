@@ -275,6 +275,11 @@ typedef enum {
  * Interface does checksum in place
  */
 #define IFLIB_NEED_SCRATCH	0x10
+/*
+ * Interface doesn't expect in_pseudo for th_sum
+ */
+#define IFLIB_SKIP_IN_PSEUDO	0x20
+
 
 
 /*
