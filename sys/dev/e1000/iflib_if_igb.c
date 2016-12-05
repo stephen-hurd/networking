@@ -167,8 +167,9 @@ static void     igb_if_led_func(if_ctx_t, int);
 static void	igb_vf_init_stats(struct adapter *);
 static void	igb_update_vf_stats_counters(struct adapter *);
 static void     igb_init_dmac(if_ctx_t ctx, u32 pba);
+#ifdef unused
 static void     igb_handle_link(void *context);
-
+#endif
 /* Management and WOL Support */
 static void	igb_init_manageability(struct adapter *);
 static void	igb_release_manageability(struct adapter *);
@@ -244,7 +245,7 @@ static device_method_t igb_if_methods[] = {
 	DEVMETHOD(ifdi_vlan_register, igb_if_vlan_register),
 	DEVMETHOD(ifdi_vlan_unregister, igb_if_vlan_unregister),
 	DEVMETHOD(ifdi_get_counter, igb_if_get_counter),
-	DEVMETHOD(ifdi_queue_intr_enable, igb_if_queue_intr_enable), 
+	DEVMETHOD(ifdi_queue_intr_enable, igb_if_queue_intr_enable),
 	DEVMETHOD_END
 };
 
@@ -1041,6 +1042,7 @@ igb_if_init(if_ctx_t ctx)
 	}
 }
 
+#ifdef unused
 static void
 igb_handle_link(void *context)
 {
@@ -1049,8 +1051,8 @@ igb_handle_link(void *context)
 
 	adapter->hw.mac.get_link_status = 1;
 	iflib_admin_intr_deferred(ctx); 
-
 }
+#endif
 
 /*********************************************************************
  *
