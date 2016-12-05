@@ -355,6 +355,9 @@ struct iflib_txq {
 	char                    ift_mtx_name[MTX_NAME_LEN];
 	char                    ift_db_mtx_name[MTX_NAME_LEN];
 	bus_dma_segment_t	ift_segs[IFLIB_MAX_TX_SEGS]  __aligned(CACHE_LINE_SIZE);
+#ifdef IFLIB_DIAGNOSTICS
+	uint64_t ift_cpu_exec_count[256];
+#endif
 } __aligned(CACHE_LINE_SIZE);
 
 struct iflib_fl {
@@ -431,6 +434,9 @@ struct iflib_rxq {
 	iflib_dma_info_t		ifr_ifdi;
 	/* dynamically allocate if any drivers need a value substantially larger than this */
 	struct if_rxd_frag	ifr_frags[IFLIB_MAX_RX_SEGS] __aligned(CACHE_LINE_SIZE);
+#ifdef IFLIB_DIAGNOSTICS
+	uint64_t ifr_cpu_exec_count[256];
+#endif
 }  __aligned(CACHE_LINE_SIZE);
 
 /*
@@ -684,7 +690,7 @@ iflib_netmap_register(struct netmap_adapter *na, int onoff)
 	ifp->if_drv_flags &= ~(IFF_DRV_RUNNING | IFF_DRV_OACTIVE);
 
 	if (!CTX_IS_VF(ctx))
-		IFDI_CRCSTRIP_SET(ctx, onoff);
+		IFDI_CRCSTRIP_SET(ctx, onoff, iflib_crcstrip);
 
 	/* enable or disable flags and callbacks in na and ifp */
 	if (onoff) {
@@ -693,7 +699,7 @@ iflib_netmap_register(struct netmap_adapter *na, int onoff)
 		nm_clear_native_flags(na);
 	}
 	IFDI_INIT(ctx);
-	IFDI_CRCSTRIP_SET(ctx, onoff); // XXX why twice ?
+	IFDI_CRCSTRIP_SET(ctx, onoff, iflib_crcstrip); // XXX why twice ?
 	CTX_UNLOCK(ctx);
 	return (ifp->if_drv_flags & IFF_DRV_RUNNING ? 0 : 1);
 }
@@ -3032,6 +3038,9 @@ _task_fn_tx(void *context)
 	iflib_txq_t txq = context;
 	if_ctx_t ctx = txq->ift_ctx;
 
+#ifdef IFLIB_DIAGNOSTICS
+	txq->ift_cpu_exec_count[curcpu]++;
+#endif
 	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
 		return;
 	ifmp_ring_check_drainage(txq->ift_br[0], TX_BATCH_SIZE);
@@ -3045,6 +3054,9 @@ _task_fn_rx(void *context)
 	bool more;
 	int rc;
 
+#ifdef IFLIB_DIAGNOSTICS
+	rxq->ifr_cpu_exec_count[curcpu]++;
+#endif
 	DBG_COUNTER_INC(task_fn_rxs);
 	if (__predict_false(!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)))
 		return;

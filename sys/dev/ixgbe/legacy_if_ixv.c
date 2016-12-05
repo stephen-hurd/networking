@@ -40,6 +40,9 @@
 
 #include "ixgbe.h"
 
+#include <net/netmap.h>
+#include <dev/netmap/netmap_kern.h>
+
 /*********************************************************************
  *  Driver version
  *********************************************************************/
@@ -132,10 +135,6 @@ static void	ixv_handle_mbx(void *, int);
  * if_ix.c.
  */
 extern void ixgbe_netmap_attach(struct adapter *adapter);
-
-#include <net/netmap.h>
-#include <sys/selinfo.h>
-#include <dev/netmap/netmap_kern.h>
 #endif /* DEV_NETMAP */
 
 /*********************************************************************
@@ -195,7 +194,7 @@ TUNABLE_INT("hw.ixv.flow_control", &ixv_flow_control);
 
 /*
  * Header split: this causes the hardware to DMA
- * the header into a seperate mbuf from the payload,
+ * the header into a separate mbuf from the payload,
  * it can be a performance win in some workloads, but
  * in others it actually hurts, its off by default.
  */
@@ -578,7 +577,8 @@ ixv_ioctl(struct ifnet * ifp, u_long command, caddr_t data)
 			ifp->if_mtu = ifr->ifr_mtu;
 			adapter->max_frame_size =
 				ifp->if_mtu + IXGBE_MTU_HDR;
-			ixv_init_locked(adapter);
+			if (ifp->if_drv_flags & IFF_DRV_RUNNING)
+				ixv_init_locked(adapter);
 			IXGBE_CORE_UNLOCK(adapter);
 		}
 		break;
@@ -829,7 +829,7 @@ ixv_handle_que(void *context, int pending)
 		}
 	}
 
-	/* Reenable this interrupt */
+	/* Re-enable this interrupt */
 	ixv_enable_queue(adapter, que->msix);
 	return;
 }
@@ -922,7 +922,7 @@ ixv_msix_que(void *arg)
 no_calc:
 	if (more)
 		taskqueue_enqueue(que->tq, &que->que_task);
-	else /* Reenable this interrupt */
+	else /* Re-enable this interrupt */
 		ixv_enable_queue(adapter, que->msix);
 	return;
 }
@@ -1141,7 +1141,7 @@ ixv_local_timer(void *arg)
 
 	}
 
-	/* Only truely watchdog if all queues show hung */
+	/* Only truly watchdog if all queues show hung */
 	if (hung == adapter->num_queues)
 		goto watchdog;
 	else if (queues != 0) { /* Force an IRQ on queues with work */
@@ -1958,7 +1958,7 @@ ixv_handle_mbx(void *context, int pending)
 }
 
 /*
-** The VF stats registers never have a truely virgin
+** The VF stats registers never have a truly virgin
 ** starting point, so this routine tries to make an
 ** artificial one, marking ground zero on attach as
 ** it were.

@@ -509,11 +509,13 @@ tcp_signature_verify_input(struct mbuf *m, int off0, int tlen, int optlen,
  *	  the ack that opens up a 0-sized window.
  *	- LRO wasn't used for this segment. We make sure by checking that the
  *	  segment size is not larger than the MSS.
+ *	- The congestion window is more than 16 segments
  */
 #define DELAY_ACK(tp, tlen)						\
 	((!tcp_timer_active(tp, TT_DELACK) &&				\
 	    (tp->t_flags & TF_RXWIN0SENT) == 0) &&			\
 	    (tlen <= tp->t_maxseg) &&					\
+	    (tp->snd_cwnd >= tp->t_maxseg*16) &&			\
 	    (V_tcp_delack_enabled || (tp->t_flags & TF_NEEDSYN)))
 
 static void inline
@@ -1642,6 +1644,9 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 		to.to_tsecr -= tp->ts_offset;
 		if (TSTMP_GT(to.to_tsecr, tcp_ts_getticks()))
 			to.to_tsecr = 0;
+		else if (tp->t_flags & TF_PREVVALID &&
+			 tp->t_badrxtwin != 0 && SEQ_LT(to.to_tsecr, tp->t_badrxtwin))
+			cc_cong_signal(tp, th, CC_RTO_ERR);
 	}
 	/*
 	 * If timestamps were negotiated during SYN/ACK they should
@@ -1747,9 +1752,10 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 				TCPSTAT_INC(tcps_predack);
 
 				/*
-				 * "bad retransmit" recovery.
+				 * "bad retransmit" recovery without timestamps.
 				 */
-				if (tp->t_rxtshift == 1 &&
+				if ((to.to_flags & TOF_TS) == 0 &&
+				    tp->t_rxtshift == 1 &&
 				    tp->t_flags & TF_PREVVALID &&
 				    (int)(ticks - tp->t_badrxtwin) < 0) {
 					cc_cong_signal(tp, th, CC_RTO_ERR);

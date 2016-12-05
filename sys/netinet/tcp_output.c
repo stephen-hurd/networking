@@ -203,7 +203,7 @@ tcp_output(struct tcpcb *tp)
 #ifdef IPSEC
 	unsigned ipsec_optlen = 0;
 #endif
-	int idle, sendalot;
+	int idle, sendalot, curticks;
 	int sack_rxmit, sack_bytes_rxmt;
 	struct sackhole *p;
 	int tso, mtu;
@@ -803,13 +803,16 @@ send:
 		/* Timestamps. */
 		if ((tp->t_flags & TF_RCVD_TSTMP) ||
 		    ((flags & TH_SYN) && (tp->t_flags & TF_REQ_TSTMP))) {
-			to.to_tsval = tcp_ts_getticks() + tp->ts_offset;
+			curticks = tcp_ts_getticks();
+			to.to_tsval = curticks + tp->ts_offset;
 			to.to_tsecr = tp->ts_recent;
 			to.to_flags |= TOF_TS;
+			if (tp->t_rxtshift == 1)
+				tp->t_badrxtwin = curticks;
 			/* Set receive buffer autosizing timestamp. */
 			if (tp->rfbuf_ts == 0 &&
 			    (so->so_rcv.sb_flags & SB_AUTOSIZE))
-				tp->rfbuf_ts = tcp_ts_getticks();
+				tp->rfbuf_ts = curticks;
 		}
 		/* Selective ACK's. */
 		if (tp->t_flags & TF_SACK_PERMIT) {

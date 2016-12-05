@@ -36,7 +36,6 @@
 #ifndef _LEGACY_IXGBE_H_
 #define _LEGACY_IXGBE_H_
 
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #ifndef IXGBE_LEGACY_TX
@@ -457,8 +456,7 @@ struct ixgbe_vf {
 struct adapter {
 	struct ixgbe_hw		hw;
 	struct ixgbe_osdep	osdep;
-
-	struct device		*dev;
+	device_t		dev;
 	struct ifnet		*ifp;
 
 	struct resource		*pci_mem;

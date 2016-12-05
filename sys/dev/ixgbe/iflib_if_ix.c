@@ -30,7 +30,7 @@
   POSSIBILITY OF SUCH DAMAGE.
 
 ******************************************************************************/
-/*$FreeBSD$*/
+/* $FreeBSD$*/
 
 
 #include "opt_inet.h"
@@ -46,7 +46,7 @@
 #ifdef	RSS
 #include <net/rss_config.h>
 #include <netinet/in_rss.h>
-#endif
+#endif /* RSS */
 
 /*********************************************************************
  *  Driver version
@@ -121,7 +121,7 @@ static void ixgbe_if_media_status(if_ctx_t ctx, struct ifmediareq * ifmr);
 static int ixgbe_if_media_change(if_ctx_t ctx);
 static int ixgbe_if_msix_intr_assign(if_ctx_t, int);
 static int ixgbe_if_mtu_set(if_ctx_t ctx, uint32_t mtu);
-static void ixgbe_if_crcstrip_set(if_ctx_t ctx, int onoff);
+static void ixgbe_if_crcstrip_set(if_ctx_t ctx, int onoff, int strip);
 static void ixgbe_if_multi_set(if_ctx_t ctx);
 static int ixgbe_if_promisc_set(if_ctx_t ctx, int flags);
 static int ixgbe_if_tx_queues_alloc(if_ctx_t ctx, caddr_t *vaddrs, uint64_t *paddrs, int nrxqs, int nrxqsets);
@@ -360,15 +360,6 @@ SYSCTL_INT(_hw_ix, OID_AUTO, enable_msix, CTLFLAG_RDTUN, &ixgbe_enable_msix, 0,
     "Enable MSI-X interrupts");
 
 /*
- * Number of Queues, can be set to 0,
- * it then autoconfigures based on the
- * number of cpus with a max of 8. This
- * can be overriden manually here.
- */
-#if 0
-#endif
-
-/*
 ** Number of TX descriptors per ring,
 ** setting higher than RX as this seems
 ** the better performing choice.
@@ -382,16 +373,6 @@ static int ixgbe_rxd = PERFORM_RXD;
 SYSCTL_INT(_hw_ix, OID_AUTO, rxd, CTLFLAG_RDTUN, &ixgbe_rxd, 0,
     "Number of receive descriptors per queue");
 
-
-/* ix_crcstrip: 0: keep CRC in rx frames (default), 1: strip it.
- *	During regular operations the CRC is stripped, but on some
- *	hardware reception of frames not multiple of 64 is slower,
- *	so using crcstrip=0 helps in benchmarks.
- */
-SYSCTL_DECL(_dev_netmap);
-int ix_crcstrip;
-SYSCTL_INT(_dev_netmap, OID_AUTO, ix_crcstrip,
-    CTLFLAG_RW, &ix_crcstrip, 0, "strip CRC on rx frames");
 
 /*
 ** Defining this on will allow the use
@@ -772,13 +753,6 @@ ixgbe_initialize_receive_units(if_ctx_t ctx)
 		hlreg |= IXGBE_HLREG0_JUMBOEN;
 	else
 		hlreg &= ~IXGBE_HLREG0_JUMBOEN;
-#ifdef DEV_NETMAP
-	/* crcstrip is conditional in netmap (in RDRXCTL too ?) */
-	if (ifp->if_capenable & IFCAP_NETMAP && !ix_crcstrip)
-		hlreg &= ~IXGBE_HLREG0_RXCRCSTRP;
-	else
-		hlreg |= IXGBE_HLREG0_RXCRCSTRP;
-#endif /* DEV_NETMAP */
 	IXGBE_WRITE_REG(hw, IXGBE_HLREG0, hlreg);
 
 	bufsz = (adapter->rx_mbuf_sz +
@@ -2953,7 +2927,7 @@ ixgbe_if_mtu_set(if_ctx_t ctx, uint32_t mtu)
 
 
 static void
-ixgbe_if_crcstrip_set(if_ctx_t ctx, int onoff)
+ixgbe_if_crcstrip_set(if_ctx_t ctx, int onoff, int crcstrip)
 {
 	struct adapter *sc = iflib_get_softc(ctx);
 	struct ixgbe_hw *hw = &sc->hw;
@@ -2975,7 +2949,7 @@ ixgbe_if_crcstrip_set(if_ctx_t ctx, int onoff)
 	/* hw requirements ... */
 	rxc &= ~IXGBE_RDRXCTL_RSCFRSTSIZE;
 	rxc |= IXGBE_RDRXCTL_RSCACKC;
-	if (onoff && !ix_crcstrip) {
+	if (onoff && !crcstrip) {
 		/* keep the crc. Fast rx */
 		hl &= ~IXGBE_HLREG0_RXCRCSTRP;
 		rxc &= ~IXGBE_RDRXCTL_CRCSTRIP;

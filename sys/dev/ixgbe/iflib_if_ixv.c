@@ -30,7 +30,7 @@
   POSSIBILITY OF SUCH DAMAGE.
 
 ******************************************************************************/
-/*$FreeBSD$*/
+/* $FreeBSD$*/
 
 
 #include "opt_inet.h"
@@ -119,18 +119,6 @@ static void	ixv_set_sysctl_value(struct adapter *, const char *,
 static int	ixv_msix_que(void *);
 static int	ixv_msix_mbx(void *);
 
-#ifdef DEV_NETMAP
-/*
- * This is defined in <dev/netmap/ixgbe_netmap.h>, which is included by
- * if_ix.c.
- */
-extern void ixgbe_netmap_attach(struct adapter *adapter);
-
-#include <net/netmap.h>
-#include <sys/selinfo.h>
-#include <dev/netmap/netmap_kern.h>
-#endif /* DEV_NETMAP */
-
 /*********************************************************************
  *  FreeBSD Device Interface Entry Points
  *********************************************************************/
@@ -216,7 +204,7 @@ TUNABLE_INT("hw.ixv.flow_control", &ixv_flow_control);
 
 /*
  * Header split: this causes the hardware to DMA
- * the header into a seperate mbuf from the payload,
+ * the header into a separate mbuf from the payload,
  * it can be a performance win in some workloads, but
  * in others it actually hurts, its off by default.
  */
