@@ -926,6 +926,10 @@ ixgbe_register(device_t dev)
  *  return 0 on success, positive on failure
  *********************************************************************/
 
+#define IXGBE_CAPS  IFCAP_TSO4 | IFCAP_TXCSUM | IFCAP_LRO | IFCAP_RXCSUM | IFCAP_VLAN_HWFILTER | IFCAP_WOL_MAGIC | \
+	IFCAP_WOL_MCAST | IFCAP_WOL | IFCAP_VLAN_HWTSO | IFCAP_HWCSUM | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | \
+	IFCAP_VLAN_HWTSO | IFCAP_VLAN_MTU | IFCAP_TXCSUM_IPV6 | IFCAP_HWCSUM_IPV6 | IFCAP_JUMBO_MTU;
+
 static int
 ixgbe_if_attach_pre(if_ctx_t ctx)
 {
@@ -1052,6 +1056,11 @@ ixgbe_if_attach_pre(if_ctx_t ctx)
 	default:
 		scctx->isc_rss_table_size = 128;
 	}
+	scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_TSO | CSUM_IP6_TCP | CSUM_IP6_UDP;
+	if (hw->mac.type != ixgbe_mac_82598EB)
+		scctx->isc_tx_csum_flags |= CSUM_SCTP |CSUM_IP6_SCTP;
+
+	scctx->isc_capenable = IXGBE_CAPS;
 	return (0);
 err_late:
 	free(adapter->mta, M_DEVBUF);
@@ -2965,48 +2974,6 @@ ixgbe_if_crcstrip_set(if_ctx_t ctx, int onoff, int crcstrip)
 	IXGBE_WRITE_REG(hw, IXGBE_RDRXCTL, rxc);
 }
 
-
-
-/*
- * Set the various hardware offload abilities.
- *
- * This takes the ifnet's if_capenable flags (e.g. set by the user using
- * ifconfig) and indicates to the OS via the ifnet's if_hwassist field what
- * mbuf offload flags the driver will understand.
- */
-static void
-ixgbe_set_if_hwassist(struct adapter *adapter)
-{
-	struct ifnet *ifp = iflib_get_ifp(adapter->ctx);
-	struct ixgbe_hw *hw = &adapter->hw;
-
-	ifp->if_hwassist = 0;
-#if __FreeBSD_version >= 1000000
-	if (ifp->if_capenable & IFCAP_TSO4)
-		ifp->if_hwassist |= CSUM_IP_TSO;
-	if (ifp->if_capenable & IFCAP_TSO6)
-		ifp->if_hwassist |= CSUM_IP6_TSO;
-	if (ifp->if_capenable & IFCAP_TXCSUM) {
-		ifp->if_hwassist |= (CSUM_IP | CSUM_IP_UDP | CSUM_IP_TCP);
-		if (hw->mac.type != ixgbe_mac_82598EB)
-			ifp->if_hwassist |= CSUM_IP_SCTP;
-	}
-	if (ifp->if_capenable & IFCAP_TXCSUM_IPV6) {
-		ifp->if_hwassist |= (CSUM_IP6_UDP | CSUM_IP6_TCP);
-		if (hw->mac.type != ixgbe_mac_82598EB)
-			ifp->if_hwassist |= CSUM_IP6_SCTP;
-	}
-#else
-	if (ifp->if_capenable & IFCAP_TSO)
-		ifp->if_hwassist |= CSUM_TSO;
-	if (ifp->if_capenable & IFCAP_TXCSUM) {
-		ifp->if_hwassist |= (CSUM_TCP | CSUM_UDP);
-		if (hw->mac.type != ixgbe_mac_82598EB)
-			ifp->if_hwassist |= CSUM_SCTP;
-	}
-#endif
-}
-
 /*********************************************************************
  *  Init entry point
  *
@@ -3056,7 +3023,6 @@ ixgbe_if_init(if_ctx_t ctx)
 	ixgbe_set_rar(hw, 0, hw->mac.addr, adapter->pool, 1);
 	hw->addr_ctrl.rar_used_count = 1;
 
-	ixgbe_set_if_hwassist(adapter);
 	ixgbe_init_hw(hw);
 
 #ifdef PCI_IOV
