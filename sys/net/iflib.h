@@ -194,6 +194,7 @@ typedef struct if_softc_ctx {
 	iflib_intr_mode_t isc_intr;
 	uint16_t isc_max_frame_size; /* set at init time by driver */
 	pci_vendor_info_t isc_vendor_info;	/* set by iflib prior to attach_pre */
+	if_txrx_t isc_txrx;
 } *if_softc_ctx_t;
 
 /*
@@ -201,7 +202,6 @@ typedef struct if_softc_ctx {
  */
 struct if_shared_ctx {
 	int isc_magic;
-	if_txrx_t isc_txrx;
 	driver_t *isc_driver;
 	int isc_nfl;
 	int isc_flags;

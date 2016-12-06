@@ -638,7 +638,7 @@ static void iflib_init_locked(if_ctx_t ctx);
 static void iflib_add_device_sysctl_pre(if_ctx_t ctx);
 static void iflib_add_device_sysctl_post(if_ctx_t ctx);
 static void iflib_ifmp_purge(iflib_txq_t txq);
-
+static void _iflib_pre_assert(if_softc_ctx_t scctx);
 
 #ifdef DEV_NETMAP
 #include <sys/selinfo.h>
@@ -3560,7 +3560,6 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 
 	ctx->ifc_sctx = sctx;
 	ctx->ifc_dev = dev;
-	ctx->ifc_txrx = *sctx->isc_txrx;
 	ctx->ifc_softc = sc;
 
 	if ((err = iflib_register(ctx)) != 0) {
@@ -3624,6 +3623,8 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 		device_printf(dev, "IFDI_ATTACH_PRE failed %d\n", err);
 		return (err);
 	}
+	_iflib_pre_assert(scctx);
+	ctx->ifc_txrx = *scctx->isc_txrx;
 
 #ifdef INVARIANTS
 	MPASS(scctx->isc_capenable);
@@ -3999,21 +4000,25 @@ _iflib_assert(if_shared_ctx_t sctx)
 	MPASS(sctx->isc_rx_nsegments);
 	MPASS(sctx->isc_rx_maxsegsize);
 
-
-	MPASS(sctx->isc_txrx->ift_txd_encap);
-	MPASS(sctx->isc_txrx->ift_txd_flush);
-	MPASS(sctx->isc_txrx->ift_txd_credits_update);
-	MPASS(sctx->isc_txrx->ift_rxd_available);
-	MPASS(sctx->isc_txrx->ift_rxd_pkt_get);
-	MPASS(sctx->isc_txrx->ift_rxd_refill);
-	MPASS(sctx->isc_txrx->ift_rxd_flush);
-
 	MPASS(sctx->isc_nrxd_min[0]);
 	MPASS(sctx->isc_nrxd_max[0]);
 	MPASS(sctx->isc_nrxd_default[0]);
 	MPASS(sctx->isc_ntxd_min[0]);
 	MPASS(sctx->isc_ntxd_max[0]);
 	MPASS(sctx->isc_ntxd_default[0]);
+}
+
+static void
+_iflib_pre_assert(if_softc_ctx_t scctx)
+{
+
+	MPASS(scctx->isc_txrx->ift_txd_encap);
+	MPASS(scctx->isc_txrx->ift_txd_flush);
+	MPASS(scctx->isc_txrx->ift_txd_credits_update);
+	MPASS(scctx->isc_txrx->ift_rxd_available);
+	MPASS(scctx->isc_txrx->ift_rxd_pkt_get);
+	MPASS(scctx->isc_txrx->ift_rxd_refill);
+	MPASS(scctx->isc_txrx->ift_rxd_flush);
 }
 
 static int
