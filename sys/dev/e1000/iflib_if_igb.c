@@ -334,7 +334,6 @@ static struct if_shared_ctx igb_sctx_init = {
 	.isc_admin_intrcnt = 1,
 	.isc_vendor_info = igb_vendor_info_array,
 	.isc_driver_version = igb_driver_version,
-	.isc_txrx = &igb_txrx,
 	.isc_driver = &igb_if_driver,
 
 	.isc_nrxd_min = {IGB_MIN_RXD},
@@ -637,6 +636,7 @@ igb_if_attach_pre(if_ctx_t ctx)
 
 	scctx->isc_txqsizes[0] = roundup2(scctx->isc_ntxd[0] * sizeof(union e1000_adv_tx_desc), IGB_DBA_ALIGN),
 	scctx->isc_rxqsizes[0] = roundup2(scctx->isc_nrxd[0] * sizeof(union e1000_adv_rx_desc), IGB_DBA_ALIGN);
+	scctx->isc_txrx = &igb_txrx;
 
 	adapter->tx_process_limit = scctx->isc_ntxd[0];
 
