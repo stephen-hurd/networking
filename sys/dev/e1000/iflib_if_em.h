@@ -267,6 +267,7 @@
 #define EM_BAR_TYPE(v)		((v) & EM_BAR_TYPE_MASK)
 #define EM_BAR_TYPE_MASK	0x00000001
 #define EM_BAR_TYPE_MMEM	0x00000000
+#define EM_BAR_TYPE_IO		0x00000001
 #define EM_BAR_TYPE_FLASH	0x0014 
 #define EM_BAR_MEM_TYPE(v)	((v) & EM_BAR_MEM_TYPE_MASK)
 #define EM_BAR_MEM_TYPE_MASK	0x00000006
@@ -423,6 +424,8 @@ struct adapter {
 
 	struct resource *memory;
 	struct resource *flash;
+	struct resource	*ioport;
+	int		io_rid;
 
 	struct resource	*res;
 	void		*tag;

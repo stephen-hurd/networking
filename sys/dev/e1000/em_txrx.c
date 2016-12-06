@@ -24,15 +24,22 @@ static int em_transmit_checksum_setup(struct adapter *adapter, if_pkt_info_t pi,
 static int em_isc_txd_encap(void *arg, if_pkt_info_t pi);
 static void em_isc_txd_flush(void *arg, uint16_t txqid, uint32_t pidx);
 static int em_isc_txd_credits_update(void *arg, uint16_t txqid, uint32_t cidx_init, bool clear);
-
 static void em_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
 			      uint32_t pidx, uint64_t *paddrs, caddr_t *vaddrs __unused, uint16_t count, uint16_t buflen __unused);
 static void em_isc_rxd_flush(void *arg, uint16_t rxqid, uint8_t flid __unused, uint32_t pidx);
 static int em_isc_rxd_available(void *arg, uint16_t rxqid, uint32_t idx,
 				int budget);
 static int em_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri);
-static void em_receive_checksum(uint32_t status, if_rxd_info_t ri);
 
+static void lem_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
+			      uint32_t pidx, uint64_t *paddrs, caddr_t *vaddrs __unused, uint16_t count, uint16_t buflen __unused);
+
+static int lem_isc_rxd_available(void *arg, uint16_t rxqid, uint32_t idx,
+				int budget);
+static int lem_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri);
+
+static void lem_receive_checksum(int status, int errors, if_rxd_info_t ri);
+static void em_receive_checksum(uint32_t status, if_rxd_info_t ri);
 extern int em_intr(void *arg);
 
 struct if_txrx em_txrx  = {
@@ -42,6 +49,17 @@ struct if_txrx em_txrx  = {
 	em_isc_rxd_available,
 	em_isc_rxd_pkt_get,
 	em_isc_rxd_refill,
+	em_isc_rxd_flush,
+	em_intr
+};
+
+struct if_txrx lem_txrx  = {
+	em_isc_txd_encap,
+	em_isc_txd_flush,
+	em_isc_txd_credits_update,
+	lem_isc_rxd_available,
+	lem_isc_rxd_pkt_get,
+	lem_isc_rxd_refill,
 	em_isc_rxd_flush,
 	em_intr
 };
@@ -276,6 +294,8 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	}
 
 	DPRINTF(iflib_get_dev(sc->ctx), "encap: set up tx: nsegs=%d first=%d i=%d\n", nsegs, first, i);
+	/* XXX adapter->pcix_82544 -- lem_fill_descriptors */
+
 	/* Set up our transmit descriptors */
 	for (j = 0; j < nsegs; j++) {
 		bus_size_t seg_len;
@@ -418,6 +438,29 @@ em_isc_txd_credits_update(void *arg, uint16_t txqid, uint32_t cidx_init, bool cl
 }
 
 static void
+lem_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
+		  uint32_t pidx, uint64_t *paddrs, caddr_t *vaddrs __unused, uint16_t count, uint16_t buflen __unused)
+{
+	struct adapter *sc = arg;
+	if_softc_ctx_t scctx = sc->shared;
+	struct em_rx_queue *que = &sc->rx_queues[rxqid];
+	struct rx_ring *rxr = &que->rxr;
+	struct e1000_rx_desc *rxd;
+	int i;
+	uint32_t next_pidx;
+
+	for (i = 0, next_pidx = pidx; i < count; i++) {
+		rxd = (struct e1000_rx_desc *)&rxr->rx_base[next_pidx];
+		rxd->buffer_addr = htole64(paddrs[i]);
+		/* status bits must be cleared */
+		rxd->status = 0;
+
+		if (++next_pidx == scctx->isc_nrxd[0])
+			next_pidx = 0;
+	}
+}
+
+static void
 em_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
 		  uint32_t pidx, uint64_t *paddrs, caddr_t *vaddrs __unused, uint16_t count, uint16_t buflen __unused)
 {
@@ -451,6 +494,33 @@ em_isc_rxd_flush(void *arg, uint16_t rxqid, uint8_t flid __unused, uint32_t pidx
 }
 
 static int
+lem_isc_rxd_available(void *arg, uint16_t rxqid, uint32_t idx, int budget)
+{
+	struct adapter *sc         = arg;
+	if_softc_ctx_t scctx = sc->shared;
+	struct em_rx_queue *que   = &sc->rx_queues[rxqid];
+	struct rx_ring *rxr        = &que->rxr;
+	struct e1000_rx_desc *rxd;
+	u32                      staterr = 0;
+	int                      cnt, i;
+
+	for (cnt = 0, i = idx; cnt < scctx->isc_nrxd[0] && cnt <= budget;) {
+		rxd = (struct e1000_rx_desc *)&rxr->rx_base[i];
+		staterr = rxd->status;
+
+		if ((staterr & E1000_RXD_STAT_DD) == 0)
+			break;
+
+		if (++i == scctx->isc_nrxd[0])
+			i = 0;
+
+		if (staterr & E1000_RXD_STAT_EOP)
+			cnt++;
+	}
+	return (cnt);
+}
+
+static int
 em_isc_rxd_available(void *arg, uint16_t rxqid, uint32_t idx, int budget)
 {
        	struct adapter *sc         = arg;
@@ -477,6 +547,67 @@ em_isc_rxd_available(void *arg, uint16_t rxqid, uint32_t idx, int budget)
 
 	}
 	return (cnt);
+}
+
+static int
+lem_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
+{
+	struct adapter           *adapter = arg;
+	if_softc_ctx_t           scctx = adapter->shared;
+	struct em_rx_queue       *que = &adapter->rx_queues[ri->iri_qsidx];
+	struct rx_ring           *rxr = &que->rxr;
+	struct e1000_rx_desc *rxd;
+	u16                      len;
+	u32                      status, errors;
+	bool                     eop;
+	int                      i, cidx;
+
+	status = errors = i = 0;
+	cidx = ri->iri_cidx;
+
+	do {
+		rxd = (struct e1000_rx_desc *)&rxr->rx_base[cidx];
+		status = rxd->status;
+		errors = rxd->errors;
+
+		/* Error Checking then decrement count */
+		MPASS ((status & E1000_RXD_STAT_DD) != 0);
+
+		len = le16toh(rxd->length);
+		ri->iri_len += len;
+
+		eop = (status & E1000_RXD_STAT_EOP) != 0;
+
+		/* Make sure bad packets are discarded */
+		if (errors & E1000_RXD_ERR_FRAME_ERR_MASK) {
+			adapter->dropped_pkts++;
+			/* XXX fixup if common */
+			return (EBADMSG);
+		}
+
+		ri->iri_frags[i].irf_flid = 0;
+		ri->iri_frags[i].irf_idx = cidx;
+		ri->iri_frags[i].irf_len = len;
+		/* Zero out the receive descriptors status. */
+		rxd->status = 0;
+
+		if (++cidx == scctx->isc_nrxd[0])
+			cidx = 0;
+		i++;
+	} while (!eop);
+
+	/* XXX add a faster way to look this up */
+	if (adapter->hw.mac.type >= e1000_82543 && !(status & E1000_RXD_STAT_IXSM))
+		lem_receive_checksum(status, errors, ri);
+
+	if (status & E1000_RXD_STAT_VP) {
+		ri->iri_vtag = le16toh(rxd->special);
+		ri->iri_flags |= M_VLANTAG;
+	}
+
+	ri->iri_nfrags = i;
+
+	return (0);
 }
 
 static int
@@ -523,9 +654,11 @@ em_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 		if (++cidx == scctx->isc_nrxd[0])
 			cidx = 0;
 		i++;
-	}while (!eop);
+	} while (!eop);
 
-	em_receive_checksum(staterr, ri);
+	/* XXX add a faster way to look this up */
+	if (adapter->hw.mac.type >= e1000_82543)
+		em_receive_checksum(staterr, ri);
 
 	if (staterr & E1000_RXD_STAT_VP) {
 		vtag = le16toh(rxd->wb.upper.vlan);
@@ -546,6 +679,23 @@ em_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
  *  doesn't spend time verifying the checksum.
  *
  *********************************************************************/
+static void
+lem_receive_checksum(int status, int errors, if_rxd_info_t ri)
+{
+	/* Did it pass? */
+	if (status & E1000_RXD_STAT_IPCS && !(errors & E1000_RXD_ERR_IPE))
+		ri->iri_csum_flags = (CSUM_IP_CHECKED|CSUM_IP_VALID);
+
+	if (status & E1000_RXD_STAT_TCPCS) {
+		/* Did it pass? */
+		if (!(errors & E1000_RXD_ERR_TCPE)) {
+			ri->iri_csum_flags |=
+			(CSUM_DATA_VALID | CSUM_PSEUDO_HDR);
+			ri->iri_csum_data = htons(0xffff);
+		}
+	}
+}
+
 static void
 em_receive_checksum(uint32_t status, if_rxd_info_t ri)
 {

@@ -3,6 +3,8 @@
 #include <sys/sbuf.h>
 #include <machine/_inttypes.h>
 
+#define em_mac_min e1000_82547
+
 /*********************************************************************
  *  Driver version:
  *********************************************************************/
@@ -20,6 +22,51 @@ char em_driver_version[] = "7.6.1-k";
 
 static pci_vendor_info_t em_vendor_info_array[] =
 {
+	/* Intel(R) PRO/1000 Network Connection - Legacy em*/
+	PVID(0x8086, E1000_DEV_ID_82540EM,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82540EM_LOM, "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82540EP, "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82540EP_LOM, "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82540EP_LP,  "Intel(R) PRO/1000 Network Connection"), 
+
+	PVID(0x8086, E1000_DEV_ID_82541EI,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82541ER,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82541ER_LOM,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82541EI_MOBILE,   "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82541GI,   "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82541GI_LF,   "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82541GI_MOBILE,  "Intel(R) PRO/1000 Network Connection"), 
+
+	PVID(0x8086, E1000_DEV_ID_82542,  "Intel(R) PRO/1000 Network Connection"), 
+
+	PVID(0x8086, E1000_DEV_ID_82543GC_FIBER,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82543GC_COPPER,  "Intel(R) PRO/1000 Network Connection"), 
+
+	PVID(0x8086, E1000_DEV_ID_82544EI_COPPER,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82544EI_FIBER,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82544GC_COPPER,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82544GC_LOM,  "Intel(R) PRO/1000 Network Connection"), 
+
+	PVID(0x8086, E1000_DEV_ID_82545EM_COPPER,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82545EM_FIBER,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82545GM_COPPER,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82545GM_FIBER,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82545GM_SERDES,  "Intel(R) PRO/1000 Network Connection"), 
+
+	PVID(0x8086, E1000_DEV_ID_82546EB_COPPER,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82546EB_FIBER,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82546EB_QUAD_COPPER,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82546GB_COPPER,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82546GB_FIBER,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82546GB_SERDES,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82546GB_PCIE,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82546GB_QUAD_COPPER,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82546GB_QUAD_COPPER_KSP3,  "Intel(R) PRO/1000 Network Connection"), 
+
+	PVID(0x8086, E1000_DEV_ID_82547EI,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82547EI_MOBILE,  "Intel(R) PRO/1000 Network Connection"), 
+	PVID(0x8086, E1000_DEV_ID_82547GI,  "Intel(R) PRO/1000 Network Connection"), 
+
 	/* Intel(R) PRO/1000 Network Connection */
         PVID(0x8086, E1000_DEV_ID_82571EB_COPPER, "Intel(R) PRO/1000 Network Connection"), 
 	PVID(0x8086, E1000_DEV_ID_82571EB_FIBER, "Intel(R) PRO/1000 Network Connection"),
@@ -170,6 +217,8 @@ static void     em_if_led_func(if_ctx_t ctx, int onoff);
 static void em_init_tx_ring(struct em_tx_queue *que);
 static int em_get_regs(SYSCTL_HANDLER_ARGS); 
 
+static void lem_smartspeed(struct adapter *adapter);
+
 /*********************************************************************
  *  FreeBSD Device Interface Entry Points
  *********************************************************************/
@@ -299,6 +348,7 @@ SYSCTL_INT(_hw_em, OID_AUTO, eee_setting, CTLFLAG_RDTUN, &eee_setting, 0,
 static int global_quad_port_a = 0;
 
 extern struct if_txrx em_txrx;
+extern struct if_txrx lem_txrx;
 
 static struct if_shared_ctx em_sctx_init = {
     	.isc_magic = IFLIB_MAGIC,
@@ -314,7 +364,6 @@ static struct if_shared_ctx em_sctx_init = {
 	.isc_admin_intrcnt = 1,
 	.isc_vendor_info = em_vendor_info_array,
 	.isc_driver_version = em_driver_version,
-	.isc_txrx = &em_txrx,
 	.isc_driver = &em_if_driver,
 	.isc_flags = IFLIB_NEED_SCRATCH | IFLIB_TSO_INIT_IP,
 
@@ -521,9 +570,6 @@ em_if_attach_pre(if_ctx_t ctx)
 	adapter->media = iflib_get_media(ctx);
         hw = &adapter->hw; 
 
-	scctx->isc_txqsizes[0] = roundup2(scctx->isc_ntxd[0] * sizeof(struct e1000_tx_desc), EM_DBA_ALIGN),
-	scctx->isc_rxqsizes[0] = roundup2(scctx->isc_nrxd[0] * sizeof(union e1000_rx_desc_extended), EM_DBA_ALIGN);
-
 	adapter->tx_process_limit = scctx->isc_ntxd[0];
 
 	/* SYSCTL stuff */
@@ -562,7 +608,18 @@ em_if_attach_pre(if_ctx_t ctx)
 	scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_IP_TSO;
 
 	scctx->isc_capenable = EM_CAPS;
-	
+	if (adapter->hw.mac.type < e1000_82543)
+		scctx->isc_capenable &= ~(IFCAP_HWCSUM|IFCAP_VLAN_HWCSUM);
+	if (adapter->hw.mac.type >= em_mac_min) {
+		scctx->isc_txqsizes[0] = roundup2(scctx->isc_ntxd[0]* sizeof(struct e1000_tx_desc), EM_DBA_ALIGN);
+		scctx->isc_rxqsizes[0] = roundup2(scctx->isc_nrxd[0] * sizeof(union e1000_rx_desc_extended), EM_DBA_ALIGN);
+		scctx->isc_txrx = &em_txrx;
+	} else {
+		scctx->isc_txqsizes[0] = roundup2((scctx->isc_ntxd[0] + 1) * sizeof(struct e1000_tx_desc), EM_DBA_ALIGN);
+		scctx->isc_rxqsizes[0] = roundup2((scctx->isc_nrxd[0] + 1) * sizeof(struct e1000_rx_desc), EM_DBA_ALIGN);
+		scctx->isc_txrx = &lem_txrx;
+	}
+
 	/* Setup PCI resources */
 	if (em_allocate_pci_resources(ctx)) {
 		device_printf(dev, "Allocation of PCI resources failed\n");
@@ -655,6 +712,10 @@ em_if_attach_pre(if_ctx_t ctx)
 	hw->phy.autoneg_wait_to_complete = FALSE;
 	hw->phy.autoneg_advertised = AUTONEG_ADV_DEFAULT;
 
+	if (adapter->hw.mac.type < em_mac_min) {
+		e1000_init_script_state_82541(&adapter->hw, TRUE);
+		e1000_set_tbi_compatibility_82543(&adapter->hw, TRUE);
+	}
 	/* Copper options */
 	if (hw->phy.media_type == e1000_media_type_copper) {
 		hw->phy.mdix = AUTO_ALL_MODES;
@@ -1150,6 +1211,8 @@ em_if_media_status(if_ctx_t ctx, struct ifmediareq *ifmr)
 
 	if ((adapter->hw.phy.media_type == e1000_media_type_fiber) ||
 	    (adapter->hw.phy.media_type == e1000_media_type_internal_serdes)) {
+		if (adapter->hw.mac.type == e1000_82545)
+			fiber_type = IFM_1000_LX;
 		ifmr->ifm_active |= fiber_type | IFM_FDX;
 	} else {
 		switch (adapter->link_speed) {
@@ -1347,14 +1410,17 @@ em_if_timer(if_ctx_t ctx, uint16_t qid)
 	    e1000_get_laa_state_82571(&adapter->hw))
 		e1000_rar_set(&adapter->hw, adapter->hw.mac.addr, 0);
 
+	if (adapter->hw.mac.type < em_mac_min)
+		lem_smartspeed(adapter);
+
 	/* Mask to use in the irq trigger */
 	if (adapter->intr_type == IFLIB_INTR_MSIX) {
-	  for (i = 0, que = adapter->rx_queues; i < adapter->num_rx_queues; i++, que++) {
-	    rxr = &que->rxr;
-	    trigger |= rxr->ims;
-	  }
+		for (i = 0, que = adapter->rx_queues; i < adapter->num_rx_queues; i++, que++) {
+			rxr = &que->rxr;
+			trigger |= rxr->ims;
+		}
 	} else {
-	  trigger = E1000_ICS_RXDMT0;
+		trigger = E1000_ICS_RXDMT0;
 	}
 }
 
@@ -1451,7 +1517,8 @@ em_if_stop(if_ctx_t ctx)
 	INIT_DEBUGOUT("em_stop: begin");
 	
 	e1000_reset_hw(&adapter->hw);
-	E1000_WRITE_REG(&adapter->hw, E1000_WUC, 0);
+	if (adapter->hw.mac.type >= e1000_82544)
+		E1000_WRITE_REG(&adapter->hw, E1000_WUC, 0);
 
 	e1000_led_off(&adapter->hw);
 	e1000_cleanup_led(&adapter->hw);
@@ -1493,7 +1560,7 @@ em_allocate_pci_resources(if_ctx_t ctx)
 {
         struct adapter *adapter = iflib_get_softc(ctx); 
         device_t	dev = iflib_get_dev(ctx); 
-	int		rid;
+	int		rid, val;
 
 	rid = PCIR_BAR(0);
 	adapter->memory = bus_alloc_resource_any(dev, SYS_RES_MEMORY,
@@ -1507,6 +1574,39 @@ em_allocate_pci_resources(if_ctx_t ctx)
 	adapter->osdep.mem_bus_space_handle =
 	    rman_get_bushandle(adapter->memory);
 	adapter->hw.hw_addr = (u8 *)&adapter->osdep.mem_bus_space_handle;
+
+	/* Only older adapters use IO mapping */
+	if (adapter->hw.mac.type < em_mac_min && 
+	    adapter->hw.mac.type > e1000_82543) {
+		/* Figure our where our IO BAR is ? */
+		for (rid = PCIR_BAR(0); rid < PCIR_CIS;) {
+			val = pci_read_config(dev, rid, 4);
+			if (EM_BAR_TYPE(val) == EM_BAR_TYPE_IO) {
+				adapter->io_rid = rid;
+				break;
+			}
+			rid += 4;
+			/* check for 64bit BAR */
+			if (EM_BAR_MEM_TYPE(val) == EM_BAR_MEM_TYPE_64BIT)
+				rid += 4;
+		}
+		if (rid >= PCIR_CIS) {
+			device_printf(dev, "Unable to locate IO BAR\n");
+			return (ENXIO);
+		}
+		adapter->ioport = bus_alloc_resource_any(dev,
+		    SYS_RES_IOPORT, &adapter->io_rid, RF_ACTIVE);
+		if (adapter->ioport == NULL) {
+			device_printf(dev, "Unable to allocate bus resource: "
+			    "ioport\n");
+			return (ENXIO);
+		}
+		adapter->hw.io_base = 0;
+		adapter->osdep.io_bus_space_tag =
+		    rman_get_bustag(adapter->ioport);
+		adapter->osdep.io_bus_space_handle =
+		    rman_get_bushandle(adapter->ioport);
+	}
 
 	adapter->hw.back = &adapter->osdep;
 
@@ -1623,6 +1723,9 @@ em_free_pci_resources(if_ctx_t ctx)
 				     EM_FLASH, adapter->flash);
 		adapter->flash = NULL;
 	}
+	if (adapter->ioport != NULL)
+		bus_release_resource(dev, SYS_RES_IOPORT,
+		    adapter->io_rid, adapter->ioport);
 }
 
 /* Setup MSI or MSI/X */
@@ -1643,6 +1746,63 @@ em_setup_msix(if_ctx_t ctx)
  *  as specified by the adapter structure.
  *
  **********************************************************************/
+
+static void
+lem_smartspeed(struct adapter *adapter)
+{
+	u16 phy_tmp;
+
+	if (adapter->link_active || (adapter->hw.phy.type != e1000_phy_igp) ||
+	    adapter->hw.mac.autoneg == 0 ||
+	    (adapter->hw.phy.autoneg_advertised & ADVERTISE_1000_FULL) == 0)
+		return;
+
+	if (adapter->smartspeed == 0) {
+		/* If Master/Slave config fault is asserted twice,
+		 * we assume back-to-back */
+		e1000_read_phy_reg(&adapter->hw, PHY_1000T_STATUS, &phy_tmp);
+		if (!(phy_tmp & SR_1000T_MS_CONFIG_FAULT))
+			return;
+		e1000_read_phy_reg(&adapter->hw, PHY_1000T_STATUS, &phy_tmp);
+		if (phy_tmp & SR_1000T_MS_CONFIG_FAULT) {
+			e1000_read_phy_reg(&adapter->hw,
+			    PHY_1000T_CTRL, &phy_tmp);
+			if(phy_tmp & CR_1000T_MS_ENABLE) {
+				phy_tmp &= ~CR_1000T_MS_ENABLE;
+				e1000_write_phy_reg(&adapter->hw,
+				    PHY_1000T_CTRL, phy_tmp);
+				adapter->smartspeed++;
+				if(adapter->hw.mac.autoneg &&
+				   !e1000_copper_link_autoneg(&adapter->hw) &&
+				   !e1000_read_phy_reg(&adapter->hw,
+				    PHY_CONTROL, &phy_tmp)) {
+					phy_tmp |= (MII_CR_AUTO_NEG_EN |
+						    MII_CR_RESTART_AUTO_NEG);
+					e1000_write_phy_reg(&adapter->hw,
+					    PHY_CONTROL, phy_tmp);
+				}
+			}
+		}
+		return;
+	} else if(adapter->smartspeed == EM_SMARTSPEED_DOWNSHIFT) {
+		/* If still no link, perhaps using 2/3 pair cable */
+		e1000_read_phy_reg(&adapter->hw, PHY_1000T_CTRL, &phy_tmp);
+		phy_tmp |= CR_1000T_MS_ENABLE;
+		e1000_write_phy_reg(&adapter->hw, PHY_1000T_CTRL, phy_tmp);
+		if(adapter->hw.mac.autoneg &&
+		   !e1000_copper_link_autoneg(&adapter->hw) &&
+		   !e1000_read_phy_reg(&adapter->hw, PHY_CONTROL, &phy_tmp)) {
+			phy_tmp |= (MII_CR_AUTO_NEG_EN |
+				    MII_CR_RESTART_AUTO_NEG);
+			e1000_write_phy_reg(&adapter->hw, PHY_CONTROL, phy_tmp);
+		}
+	}
+	/* Restart process after EM_SMARTSPEED_MAX iterations */
+	if(adapter->smartspeed++ == EM_SMARTSPEED_MAX)
+		adapter->smartspeed = 0;
+}
+
+
 static void
 em_reset(if_ctx_t ctx)
 {
@@ -1859,6 +2019,9 @@ em_setup_interface(if_ctx_t ctx)
 	if ((adapter->hw.phy.media_type == e1000_media_type_fiber) ||
 	    (adapter->hw.phy.media_type == e1000_media_type_internal_serdes)) {
 		u_char fiber_type = IFM_1000_SX;	/* default type */
+
+		if (adapter->hw.mac.type == e1000_82545)
+			fiber_type = IFM_1000_LX;
 		ifmedia_add(adapter->media, IFM_ETHER | fiber_type | IFM_FDX, 0, NULL);
 		ifmedia_add(adapter->media, IFM_ETHER | fiber_type, 0, NULL);
 	} else {
@@ -2061,6 +2224,11 @@ em_initialize_transmit_unit(if_ctx_t ctx)
 		tipg |= DEFAULT_80003ES2LAN_TIPG_IPGR2 <<
 		    E1000_TIPG_IPGR2_SHIFT;
 		break;
+	case e1000_82542:
+		tipg = DEFAULT_82542_TIPG_IPGT;
+		tipg |= DEFAULT_82542_TIPG_IPGR1 << E1000_TIPG_IPGR1_SHIFT;
+		tipg |= DEFAULT_82542_TIPG_IPGR2 << E1000_TIPG_IPGR2_SHIFT;
+		break;
 	default:
 		if ((adapter->hw.phy.media_type == e1000_media_type_fiber) ||
 		    (adapter->hw.phy.media_type ==
@@ -2176,16 +2344,18 @@ em_initialize_receive_unit(if_ctx_t ctx)
         if (!em_disable_crc_stripping)
 		rctl |= E1000_RCTL_SECRC;
 
-	E1000_WRITE_REG(&adapter->hw, E1000_RADV,
-	    adapter->rx_abs_int_delay.value);
+	if (adapter->hw.mac.type >= e1000_82540) {
+		E1000_WRITE_REG(&adapter->hw, E1000_RADV,
+				adapter->rx_abs_int_delay.value);
 
+		/*
+		 * Set the interrupt throttling rate. Value is calculated
+		 * as DEFAULT_ITR = 1/(MAX_INTS_PER_SEC * 256ns)
+		 */
+		E1000_WRITE_REG(hw, E1000_ITR, DEFAULT_ITR);
+	}
 	E1000_WRITE_REG(&adapter->hw, E1000_RDTR,
 	    adapter->rx_int_delay.value);
-	/*
-	 * Set the interrupt throttling rate. Value is calculated
-	 * as DEFAULT_ITR = 1/(MAX_INTS_PER_SEC * 256ns)
-	 */
-	E1000_WRITE_REG(hw, E1000_ITR, DEFAULT_ITR);
 
 	/* Use extended rx descriptor formats */
 	rfctl = E1000_READ_REG(hw, E1000_RFCTL);
@@ -2204,13 +2374,14 @@ em_initialize_receive_unit(if_ctx_t ctx)
 	E1000_WRITE_REG(hw, E1000_RFCTL, rfctl);
 
 	rxcsum = E1000_READ_REG(hw, E1000_RXCSUM);
-	if (if_getcapenable(ifp) & IFCAP_RXCSUM) {
+	if (if_getcapenable(ifp) & IFCAP_RXCSUM &&
+	    adapter->hw.mac.type >= e1000_82543) {
 		if (adapter->num_tx_queues > 1) {
-		rxcsum |= E1000_RXCSUM_TUOFL |
-			  E1000_RXCSUM_IPOFL |
-			  E1000_RXCSUM_PCSD;
+			rxcsum |= E1000_RXCSUM_TUOFL |
+				E1000_RXCSUM_IPOFL |
+				E1000_RXCSUM_PCSD;
 		} else {
-		rxcsum |= E1000_RXCSUM_TUOFL;
+			rxcsum |= E1000_RXCSUM_TUOFL | E1000_RXCSUM_IPOFL;
 		}
 	} else
 		rxcsum &= ~E1000_RXCSUM_TUOFL;
@@ -2543,6 +2714,24 @@ em_get_wakeup(if_ctx_t ctx)
 	apme_mask = EM_EEPROM_APME;
 
 	switch (adapter->hw.mac.type) {
+	case e1000_82542:
+	case e1000_82543:
+		break;
+	case e1000_82544:
+		e1000_read_nvm(&adapter->hw,
+		    NVM_INIT_CONTROL2_REG, 1, &eeprom_data);
+		apme_mask = EM_82544_APME;
+		break;
+	case e1000_82546:
+	case e1000_82546_rev_3:
+		if (adapter->hw.bus.func == 1) {
+			e1000_read_nvm(&adapter->hw,
+			    NVM_INIT_CONTROL3_PORT_B, 1, &eeprom_data);
+			break;
+		} else
+			e1000_read_nvm(&adapter->hw,
+			    NVM_INIT_CONTROL3_PORT_A, 1, &eeprom_data);
+		break;
 	case e1000_82573:
 	case e1000_82583:
 		adapter->has_amt = TRUE;
@@ -2581,6 +2770,25 @@ em_get_wakeup(if_ctx_t ctx)
 	 */
 	device_id = pci_get_device(dev);
         switch (device_id) {
+	case E1000_DEV_ID_82546GB_PCIE:
+		adapter->wol = 0;
+		break;
+	case E1000_DEV_ID_82546EB_FIBER:
+	case E1000_DEV_ID_82546GB_FIBER:
+		/* Wake events only supported on port A for dual fiber
+		 * regardless of eeprom setting */
+		if (E1000_READ_REG(&adapter->hw, E1000_STATUS) &
+		    E1000_STATUS_FUNC_1)
+			adapter->wol = 0;
+		break;
+	case E1000_DEV_ID_82546GB_QUAD_COPPER_KSP3:
+                /* if quad port adapter, disable WoL on all but port A */
+		if (global_quad_port_a != 0)
+			adapter->wol = 0;
+		/* Reset for multiple quad port adapters */
+		if (++global_quad_port_a == 4)
+			global_quad_port_a = 0;
+                break;
 	case E1000_DEV_ID_82571EB_FIBER:
 		/* Wake events only supported on port A for dual fiber
 		 * regardless of eeprom setting */
