@@ -383,7 +383,6 @@ static struct if_shared_ctx ixl_sctx_init = {
 	.isc_admin_intrcnt = 1,
 	.isc_vendor_info = ixl_vendor_info_array,
 	.isc_driver_version = ixl_driver_version,
-	.isc_txrx = &ixl_txrx,
 	.isc_driver = &ixl_if_driver,
 
 	.isc_nrxd_min = {MIN_RXD},

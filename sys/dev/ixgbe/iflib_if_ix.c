@@ -419,7 +419,6 @@ static struct if_shared_ctx ixgbe_sctx_init = {
 	.isc_admin_intrcnt = 1,
 	.isc_vendor_info = ixgbe_vendor_info_array,
 	.isc_driver_version = ixgbe_driver_version,
-	.isc_txrx = &ixgbe_txrx,
 	.isc_driver = &ixgbe_if_driver,
 
 	.isc_nrxd_min = {MIN_RXD},
@@ -1056,6 +1055,7 @@ ixgbe_if_attach_pre(if_ctx_t ctx)
 	default:
 		scctx->isc_rss_table_size = 128;
 	}
+	scctx->isc_txrx = &ixgbe_txrx;
 	scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_TSO | CSUM_IP6_TCP | CSUM_IP6_UDP;
 	if (hw->mac.type != ixgbe_mac_82598EB)
 		scctx->isc_tx_csum_flags |= CSUM_SCTP |CSUM_IP6_SCTP;

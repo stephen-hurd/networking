@@ -268,7 +268,6 @@ static struct if_shared_ctx ixlv_sctx_init = {
 	.isc_admin_intrcnt = 1,
 	.isc_vendor_info = ixlv_vendor_info_array,
 	.isc_driver_version = ixlv_driver_version,
-	.isc_txrx = &ixl_txrx,
 	.isc_driver = &ixlv_if_driver,
 };
 

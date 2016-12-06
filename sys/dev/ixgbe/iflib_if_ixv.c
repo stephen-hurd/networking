@@ -247,7 +247,6 @@ static struct if_shared_ctx ixv_sctx_init = {
 	.isc_admin_intrcnt = 1,
 	.isc_vendor_info = ixv_vendor_info_array,
 	.isc_driver_version = ixv_driver_version,
-	.isc_txrx = &ixgbe_txrx,
 	.isc_driver = &ixv_if_driver,
 };
 
@@ -491,6 +490,7 @@ ixv_if_attach_pre(if_ctx_t ctx)
 							  sizeof(u32), DBA_ALIGN),
 	scctx->isc_rxqsizes[0] = roundup2(scctx->isc_nrxd[0] * sizeof(union ixgbe_adv_rx_desc), DBA_ALIGN);
 
+	scctx->isc_txrx = &ixgbe_txrx;
 	/*
 	** Initialize the shared code: its
 	** at this point the mac type is set.
