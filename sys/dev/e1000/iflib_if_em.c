@@ -1094,8 +1094,9 @@ em_if_init(if_ctx_t ctx)
 	E1000_WRITE_REG(&adapter->hw, E1000_VET, ETHERTYPE_VLAN);
 
 	/* Clear bad data from Rx FIFOs */
-	e1000_rx_fifo_flush_82575(&adapter->hw);
-	
+	if (adapter->hw.mac.type > igb_mac_min)
+		e1000_rx_fifo_flush_82575(&adapter->hw);
+
 	/* Configure for OS presence */
 	em_init_manageability(adapter);
 
@@ -1135,7 +1136,15 @@ em_if_init(if_ctx_t ctx)
 	em_if_set_promisc(ctx, IFF_PROMISC);
 	e1000_clear_hw_cntrs_base_generic(&adapter->hw);
 
-	if (adapter->intr_type == IFLIB_INTR_MSIX) /* Set up queue routing */
+	/* MSI/X configuration for 82574 */
+	if (adapter->hw.mac.type == e1000_82574) {
+		int tmp = E1000_READ_REG(&adapter->hw, E1000_CTRL_EXT);
+
+		tmp |= E1000_CTRL_EXT_PBA_CLR;
+		E1000_WRITE_REG(&adapter->hw, E1000_CTRL_EXT, tmp);
+		/* Set the IVAR - interrupt vector routing. */
+		E1000_WRITE_REG(&adapter->hw, E1000_IVAR, adapter->ivars);
+	} else if (adapter->intr_type == IFLIB_INTR_MSIX) /* Set up queue routing */
 		igb_configure_queues(adapter);
 
 	/* this clears any pending interrupts */
@@ -1827,13 +1836,6 @@ igb_configure_queues(struct adapter *adapter)
 
 	/* Turn on MSIX */
 	switch (adapter->hw.mac.type) {
-	case  e1000_82574:
-		tmp = E1000_READ_REG(&adapter->hw, E1000_CTRL_EXT);
-		tmp |= E1000_CTRL_EXT_PBA_CLR;
-		E1000_WRITE_REG(&adapter->hw, E1000_CTRL_EXT, tmp);
-		/* Set the IVAR - interrupt vector routing. */
-		E1000_WRITE_REG(&adapter->hw, E1000_IVAR, adapter->ivars);
-		break;
 	case e1000_82580:
 	case e1000_i350:
 	case e1000_i354:
