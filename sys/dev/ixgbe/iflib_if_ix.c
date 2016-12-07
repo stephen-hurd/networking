@@ -925,9 +925,9 @@ ixgbe_register(device_t dev)
  *  return 0 on success, positive on failure
  *********************************************************************/
 
-#define IXGBE_CAPS  IFCAP_TSO4 | IFCAP_TXCSUM | IFCAP_LRO | IFCAP_RXCSUM | IFCAP_VLAN_HWFILTER | IFCAP_WOL_MAGIC | \
-	IFCAP_WOL_MCAST | IFCAP_WOL | IFCAP_VLAN_HWTSO | IFCAP_HWCSUM | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | \
-	IFCAP_VLAN_HWTSO | IFCAP_VLAN_MTU | IFCAP_TXCSUM_IPV6 | IFCAP_HWCSUM_IPV6 | IFCAP_JUMBO_MTU;
+#define IXGBE_CAPS  IFCAP_TSO4 | IFCAP_TSO6 | IFCAP_TXCSUM | IFCAP_TXCSUM_IPV6 | IFCAP_RXCSUM | IFCAP_RXCSUM_IPV6 | \
+	IFCAP_VLAN_HWFILTER | IFCAP_WOL_MAGIC |	IFCAP_WOL_MCAST | IFCAP_WOL | IFCAP_VLAN_HWTSO | IFCAP_HWCSUM | \
+	IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO | IFCAP_VLAN_MTU | IFCAP_HWCSUM_IPV6 | IFCAP_JUMBO_MTU | IFCAP_LRO;
 
 static int
 ixgbe_if_attach_pre(if_ctx_t ctx)
@@ -1056,7 +1056,7 @@ ixgbe_if_attach_pre(if_ctx_t ctx)
 		scctx->isc_rss_table_size = 128;
 	}
 	scctx->isc_txrx = &ixgbe_txrx;
-	scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_TSO | CSUM_IP6_TCP | CSUM_IP6_UDP;
+	scctx->isc_tx_csum_flags = CSUM_IP | CSUM_TCP | CSUM_UDP | CSUM_TSO | CSUM_IP6_TCP | CSUM_IP6_UDP | CSUM_IP6_TSO;
 	if (hw->mac.type != ixgbe_mac_82598EB)
 		scctx->isc_tx_csum_flags |= CSUM_SCTP |CSUM_IP6_SCTP;
 
