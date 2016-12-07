@@ -1094,7 +1094,7 @@ em_if_init(if_ctx_t ctx)
 	E1000_WRITE_REG(&adapter->hw, E1000_VET, ETHERTYPE_VLAN);
 
 	/* Clear bad data from Rx FIFOs */
-	if (adapter->hw.mac.type > igb_mac_min)
+	if (adapter->hw.mac.type >= igb_mac_min)
 		e1000_rx_fifo_flush_82575(&adapter->hw);
 
 	/* Configure for OS presence */
@@ -1228,7 +1228,7 @@ em_if_queue_intr_enable(if_ctx_t ctx, uint16_t rxqid)
         struct adapter	*adapter = iflib_get_softc(ctx);
 	struct em_rx_queue *rxq = &adapter->rx_queues[rxqid];
 	
-	if (adapter->hw.mac.type > igb_mac_min)
+	if (adapter->hw.mac.type >= igb_mac_min)
 		igb_enable_queue(adapter, rxq);
 	else
 		em_enable_queue(adapter, rxq);
@@ -3016,21 +3016,21 @@ em_if_enable_intr(if_ctx_t ctx)
 {
         struct adapter *adapter = iflib_get_softc(ctx); 
 	struct e1000_hw *hw = &adapter->hw;
+	u32 ims_mask = IMS_ENABLE_MASK;
 
-	if (adapter->intr_type == IFLIB_INTR_MSIX) {
+	if (hw->mac.type == e1000_82574) {
+		E1000_WRITE_REG(hw, EM_EIAC, adapter->ims);
+		ims_mask |= adapter->ims;
+	} if (adapter->intr_type == IFLIB_INTR_MSIX && hw->mac.type >= igb_mac_min)  {
 		u32 mask = (adapter->que_mask | adapter->link_mask);
 
-		if (hw->mac.type > igb_mac_min)  {
+		E1000_WRITE_REG(&adapter->hw, E1000_EIAC, mask);
+		E1000_WRITE_REG(&adapter->hw, E1000_EIAM, mask);
+		E1000_WRITE_REG(&adapter->hw, E1000_EIMS, mask);
+		ims_mask = E1000_IMS_LSC;
+	}
 
-			E1000_WRITE_REG(&adapter->hw, E1000_EIAC, mask);
-			E1000_WRITE_REG(&adapter->hw, E1000_EIAM, mask);
-			E1000_WRITE_REG(&adapter->hw, E1000_EIMS, mask);
-			E1000_WRITE_REG(&adapter->hw, E1000_IMS, E1000_IMS_LSC);
-		} else if (hw->mac.type == e1000_82574) {
-			E1000_WRITE_REG(hw, EM_EIAC, mask);
-		}
-	} else 
-		E1000_WRITE_REG(hw, E1000_IMS, IMS_ENABLE_MASK);
+	E1000_WRITE_REG(hw, E1000_IMS, ims_mask);
 }
 
 static void
@@ -3038,9 +3038,9 @@ em_if_disable_intr(if_ctx_t ctx)
 {
         struct adapter *adapter = iflib_get_softc(ctx); 
 	struct e1000_hw *hw = &adapter->hw;
-	
+
 	if (adapter->intr_type == IFLIB_INTR_MSIX) {
-		if (hw->mac.type > igb_mac_min)
+		if (hw->mac.type >= igb_mac_min)
 			E1000_WRITE_REG(&adapter->hw, E1000_EIMC, ~0);
 		E1000_WRITE_REG(&adapter->hw, E1000_EIAC, 0);
 	} 
