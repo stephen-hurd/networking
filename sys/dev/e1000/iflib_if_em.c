@@ -348,6 +348,8 @@ static driver_t em_if_driver = {
 
 static SYSCTL_NODE(_hw, OID_AUTO, em, CTLFLAG_RD, 0, "EM driver parameters");
 
+static int global_igb_index = 0;
+
 static int em_disable_crc_stripping = 0;
 SYSCTL_INT(_hw_em, OID_AUTO, disable_crc_stripping, CTLFLAG_RDTUN,
     &em_disable_crc_stripping, 0, "Disable CRC Stripping");
@@ -686,6 +688,9 @@ em_if_attach_pre(if_ctx_t ctx)
 		scctx->isc_capenable = IGB_CAPS;
 		scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_TSO | CSUM_IP6_TCP \
 			| CSUM_IP6_UDP | CSUM_IP6_TCP;
+
+		/* KEEP OLD NEW NAME */
+		if_initname(iflib_get_ifp(ctx), "igb", global_igb_index++);
 
 	} else if (adapter->hw.mac.type >= em_mac_min) {
 		scctx->isc_txqsizes[0] = roundup2(scctx->isc_ntxd[0]* sizeof(struct e1000_tx_desc), EM_DBA_ALIGN);
