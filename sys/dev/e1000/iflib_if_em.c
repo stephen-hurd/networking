@@ -1764,7 +1764,7 @@ em_if_msix_intr_assign(if_ctx_t ctx, int msix)
 		** are for RX0 and RX1, note this has
 		** NOTHING to do with the MSIX vector
 		*/
-		if (adapter->hw.mac.type < em_mac_min) {
+		if (adapter->hw.mac.type == e1000_82574) {
 			rx_que->eims = 1 << (20 + i);
 			adapter->ims |= rx_que->eims;
 			adapter->ivars |= (8 | rx_que->msix) << (i * 4);
