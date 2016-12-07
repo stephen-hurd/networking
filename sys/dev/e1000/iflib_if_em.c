@@ -688,7 +688,8 @@ em_if_attach_pre(if_ctx_t ctx)
 		scctx->isc_capenable = IGB_CAPS;
 		scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_TSO | CSUM_IP6_TCP \
 			| CSUM_IP6_UDP | CSUM_IP6_TCP;
-
+		if (adapter->hw.mac.type != e1000_82575)
+			scctx->isc_tx_csum_flags |= CSUM_SCTP | CSUM_IP6_SCTP;
 		/* KEEP OLD NEW NAME */
 		if_initname(iflib_get_ifp(ctx), "igb", global_igb_index++);
 
@@ -2778,7 +2779,7 @@ em_initialize_receive_unit(if_ctx_t ctx)
 	if (if_getcapenable(ifp) & IFCAP_RXCSUM &&
 	    adapter->hw.mac.type >= e1000_82543) {
 		if (adapter->tx_num_queues > 1) {
-			if (adapter->hw.mac.type > igb_mac_min) {
+			if (adapter->hw.mac.type >= igb_mac_min) {
 				rxcsum |= E1000_RXCSUM_PCSD;		
 				if (hw->mac.type != e1000_82575)
 					rxcsum |= E1000_RXCSUM_CRCOFL;
