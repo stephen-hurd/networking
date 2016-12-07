@@ -3,7 +3,7 @@
 #endif
 
 #ifdef IFLIB
-#include "if_igb.h"
+#include "if_em.h"
 
 #ifdef	RSS
 #include <net/rss_config.h>
@@ -15,7 +15,6 @@
 #else
 #define DPRINTF(...)
 #endif
-
 
 /*********************************************************************
  *  Local Function prototypes
@@ -36,10 +35,9 @@ static int igb_tso_setup(struct tx_ring *txr, if_pkt_info_t pi, u32 *cmd_type_le
 
 static void igb_rx_checksum(u32 staterr, if_rxd_info_t ri, u32 ptype);
 static int igb_determine_rsstype(u16 pkt_info);	
-void igb_init_tx_ring(struct igb_tx_queue *que);
 
 extern void igb_if_enable_intr(if_ctx_t ctx);
-extern int igb_intr(void *arg);
+extern int em_intr(void *arg);
 
 struct if_txrx igb_txrx  = {
 	igb_isc_txd_encap,
@@ -49,24 +47,10 @@ struct if_txrx igb_txrx  = {
 	igb_isc_rxd_pkt_get,
 	igb_isc_rxd_refill,
 	igb_isc_rxd_flush,
-	igb_intr
+	em_intr
 };
 
-extern if_shared_ctx_t igb_sctx;
-
-void
-igb_init_tx_ring(struct igb_tx_queue *que)
-{
-	struct adapter *adapter = que->adapter;
-	if_softc_ctx_t scctx = adapter->shared; 
-	struct tx_ring *txr = &que->txr;
-	struct igb_tx_buf *buf;
-
-	buf = txr->tx_buffers;
-	for (int i = 0; i < scctx->isc_ntxd[0]; i++, buf++) {
-		buf->eop = NULL;
-	}
-}
+extern if_shared_ctx_t em_sctx;
 
 /**********************************************************************
  *
@@ -130,8 +114,6 @@ igb_tso_setup(struct tx_ring *txr, if_pkt_info_t pi, u32 *cmd_type_len, u32 *oli
 	*olinfo_status |= E1000_TXD_POPTS_TXSM << 8;
 	*olinfo_status |= paylen << E1000_ADVTXD_PAYLEN_SHIFT;
   
-        ++txr->tso_tx; 
-
         return (1);
 }
 
@@ -243,16 +225,17 @@ igb_isc_txd_encap(void *arg, if_pkt_info_t pi)
 {
 	struct adapter *sc        = arg;
 	if_softc_ctx_t scctx      = sc->shared;
-	struct igb_tx_queue *que  = &sc->tx_queues[pi->ipi_qsidx];
+	struct em_tx_queue *que  = &sc->tx_queues[pi->ipi_qsidx];
 	struct tx_ring *txr       = &que->txr;
 	int nsegs                 = pi->ipi_nsegs;
 	bus_dma_segment_t *segs   = pi->ipi_segs;
-	struct igb_tx_buf *txbuf;
+	struct em_txbuffer *txbuf;
 	union e1000_adv_tx_desc *txd = NULL;  
 	
-	int                    i, j, first;
-	u32                    olinfo_status = 0, cmd_type_len;
- 	
+	int                    i, j, first, pidx_last;
+	u32                    olinfo_status, cmd_type_len;
+
+	pidx_last = olinfo_status = 0;
 	/* Basic descriptor defines */
 	cmd_type_len = (E1000_ADVTXD_DTYP_DATA |
 					E1000_ADVTXD_DCMD_IFCS | E1000_ADVTXD_DCMD_DEXT);
@@ -269,14 +252,14 @@ igb_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	
 	/* 82575 needs the queue index added */
 	if (sc->hw.mac.type == e1000_82575)
-	  olinfo_status |= txr->me << 4;
+		olinfo_status |= txr->me << 4;
 	
 	for (j = 0; j < nsegs; j++) {
 		bus_size_t seglen;
 		bus_addr_t segaddr;
 
 		txbuf = &txr->tx_buffers[i];
-		txd = &txr->tx_base[i];
+		txd = (union e1000_adv_tx_desc *)&txr->tx_base[i];
 		seglen = segs[j].ds_len;
 		segaddr = htole64(segs[j].ds_addr);
 
@@ -284,7 +267,7 @@ igb_isc_txd_encap(void *arg, if_pkt_info_t pi)
 		txd->read.cmd_type_len = htole32(E1000_TXD_CMD_IFCS |
 		    cmd_type_len | seglen);
 		txd->read.olinfo_status = htole32(olinfo_status);
-
+		pidx_last = i;
 		if (++i == scctx->isc_ntxd[0]) {
 			i = 0;
 		}
@@ -295,19 +278,18 @@ igb_isc_txd_encap(void *arg, if_pkt_info_t pi)
 		
 	/* Set the EOP descriptor that will be marked done */
 	txbuf = &txr->tx_buffers[first]; 
-	txbuf->eop = txd;
+	txbuf->eop = pidx_last;
 
 	pi->ipi_new_pidx = i;
-	++txr->total_packets;
   
-    return (0);
+	return (0);
 }
 
 static void
 igb_isc_txd_flush(void *arg, uint16_t txqid, uint32_t pidx)
 {
        struct adapter *adapter      = arg;
-       struct igb_tx_queue *que     = &adapter->tx_queues[txqid];
+       struct em_tx_queue *que     = &adapter->tx_queues[txqid];
        struct tx_ring *txr          = &que->txr;
   
        E1000_WRITE_REG(&adapter->hw, E1000_TDT(txr->me), pidx);
@@ -318,53 +300,50 @@ igb_isc_txd_credits_update(void *arg, uint16_t txqid, uint32_t cidx_init, bool c
 {
 	struct adapter      *adapter = arg;
 	if_softc_ctx_t      scctx = adapter->shared; 
-	struct igb_tx_queue *que = &adapter->tx_queues[txqid];
+	struct em_tx_queue *que = &adapter->tx_queues[txqid];
 	struct tx_ring      *txr = &que->txr;
 
 	u32       cidx, ntxd, processed = 0;
 
-	struct igb_tx_buf *buf;
-	union e1000_adv_tx_desc *txd;
+	struct em_txbuffer *buf;
+	union e1000_adv_tx_desc *txd, *eop;
         int limit;
 	
 	cidx = cidx_init;
 
 	buf = &txr->tx_buffers[cidx];
-	txd = &txr->tx_base[cidx];
+	txd = (union e1000_adv_tx_desc *)&txr->tx_base[cidx];
 	ntxd = scctx->isc_ntxd[0];
 	limit = adapter->tx_process_limit; 
 
 	do {
-		union e1000_adv_tx_desc *eop = buf->eop; 
-
-		if (eop == NULL) /* No work */
+		if (buf->eop == -1) /* No work */
 			break;
 
+		eop = (union e1000_adv_tx_desc *)&txr->tx_base[buf->eop];
 		if ((eop->wb.status & E1000_TXD_STAT_DD) == 0)
 			break;	/* I/O not complete */
 		
 		if (clear)
-			buf->eop = NULL; /* clear indicate processed */
+			buf->eop = -1; /* clear indicate processed */
 
                 /* We clean the range if multi segment */
 		while (txd != eop) {
-		  ++txd;
-		  ++buf;
-		  /* wrap the ring? */
-		  if (++cidx == scctx->isc_ntxd[0]) {
-		       	cidx = 0;
-			buf = txr->tx_buffers;
-			txd = txr->tx_base;
-		  }
+			++txd;
+			++buf;
+			/* wrap the ring? */
+			if (++cidx == scctx->isc_ntxd[0]) {
+				cidx = 0;
+				buf = txr->tx_buffers;
+				txd = (union e1000_adv_tx_desc *)txr->tx_base;
+			}
 		 
-		  buf = &txr->tx_buffers[cidx];
-		  if (clear)
-		    buf->eop = NULL; 
-                  processed++; 
+			buf = &txr->tx_buffers[cidx];
+			if (clear)
+				buf->eop = -1; 
+			processed++; 
 		}
 		processed++;
-		if (clear)
-			++txr->packets;
 
 		/* Try the next packet */
 		txd++;
@@ -374,7 +353,7 @@ igb_isc_txd_credits_update(void *arg, uint16_t txqid, uint32_t cidx_init, bool c
 		if (++cidx == scctx->isc_ntxd[0]) {
 			cidx = 0;
 			buf = txr->tx_buffers;
-			txd = txr->tx_base;
+			txd = (union e1000_adv_tx_desc *)txr->tx_base;
 		}
 		prefetch(txd);
 		prefetch(txd+1);
@@ -390,13 +369,16 @@ igb_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
 {
 	struct adapter *sc           = arg;
 	if_softc_ctx_t scctx         = sc->shared; 
-	struct igb_rx_queue *que     = &sc->rx_queues[rxqid];
+	struct em_rx_queue *que     = &sc->rx_queues[rxqid];
+	union e1000_adv_rx_desc *rxd;
 	struct rx_ring *rxr          = &que->rxr;
 	int			     i;
 	uint32_t next_pidx;
 
 	for (i = 0, next_pidx = pidx; i < count; i++) {
-		rxr->rx_base[next_pidx].read.pkt_addr = htole64(paddrs[i]);
+		rxd = (union e1000_adv_rx_desc *)&rxr->rx_base[next_pidx];
+
+		rxd->read.pkt_addr = htole64(paddrs[i]);
 		if (++next_pidx == scctx->isc_nrxd[0])
 			next_pidx = 0;
 	}
@@ -406,7 +388,7 @@ static void
 igb_isc_rxd_flush(void *arg, uint16_t rxqid, uint8_t flid __unused, uint32_t pidx)
 {
 	struct adapter *sc           = arg;
-	struct igb_rx_queue *que     = &sc->rx_queues[rxqid];
+	struct em_rx_queue *que     = &sc->rx_queues[rxqid];
 	struct rx_ring *rxr          = &que->rxr;
 
 	E1000_WRITE_REG(&sc->hw, E1000_RDT(rxr->me), pidx);
@@ -417,14 +399,14 @@ igb_isc_rxd_available(void *arg, uint16_t rxqid, uint32_t idx, int budget)
 {
 	struct adapter *sc           = arg;
 	if_softc_ctx_t scctx         = sc->shared; 
-	struct igb_rx_queue *que     = &sc->rx_queues[rxqid];
+	struct em_rx_queue *que     = &sc->rx_queues[rxqid];
 	struct rx_ring *rxr      = &que->rxr;
 	union e1000_adv_rx_desc *rxd;
 	u32                      staterr = 0;
 	int                      cnt, i, iter;
 
 	for (iter = cnt = 0, i = idx; iter < scctx->isc_nrxd[0] && iter <= budget;) {
-		rxd = &rxr->rx_base[i];
+		rxd = (union e1000_adv_rx_desc *)&rxr->rx_base[i];
 		staterr = le32toh(rxd->wb.upper.status_error);	
 		
 		if ((staterr & E1000_RXD_STAT_DD) == 0)
@@ -460,7 +442,7 @@ igb_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 {
 	struct adapter           *adapter = arg;
 	if_softc_ctx_t           scctx = adapter->shared; 
-	struct igb_rx_queue      *que = &adapter->rx_queues[ri->iri_qsidx];
+	struct em_rx_queue      *que = &adapter->rx_queues[ri->iri_qsidx];
 	struct rx_ring           *rxr = &que->rxr;
 	struct ifnet             *ifp = iflib_get_ifp(adapter->ctx);
 	union e1000_adv_rx_desc  *rxd;
@@ -474,7 +456,7 @@ igb_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 	int                      cidx = ri->iri_cidx;
 
 	do {
-		rxd = &rxr->rx_base[cidx];
+		rxd = (union e1000_adv_rx_desc *)&rxr->rx_base[cidx];
 		staterr = le32toh(rxd->wb.upper.status_error);
 		pkt_info = le16toh(rxd->wb.lower.lo_dword.hs_rss.pkt_info);
 		
@@ -484,7 +466,6 @@ igb_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 		ptype = le32toh(rxd->wb.lower.lo_dword.data) &  IGB_PKTTYPE_MASK;
 
 		ri->iri_len += len;
-		rxr->bytes += ri->iri_len;
 		rxr->rx_bytes += ri->iri_len; 
 
 		rxd->wb.upper.status_error = 0;
@@ -509,17 +490,17 @@ igb_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 	
 		if (++cidx == scctx->isc_nrxd[0])
 			cidx = 0;
-		
+#ifdef notyet		
 		if (rxr->hdr_split == TRUE) {
-		  ri->iri_frags[i].irf_flid = 1;
-		  ri->iri_frags[i].irf_idx = cidx; 
-		  if (++cidx == scctx->isc_nrxd[0])
-		    cidx = 0;
-		} 
+			ri->iri_frags[i].irf_flid = 1;
+			ri->iri_frags[i].irf_idx = cidx; 
+			if (++cidx == scctx->isc_nrxd[0])
+				cidx = 0;
+		}
+#endif		
 		i++;
 	} while (!eop);
 	
-	rxr->packets++;
 	rxr->rx_packets++;
 
 	if ((ifp->if_capenable & IFCAP_RXCSUM) != 0)

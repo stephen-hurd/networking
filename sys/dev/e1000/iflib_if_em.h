@@ -82,7 +82,7 @@
  *   desscriptors should meet the following condition.
  *      (num_tx_desc * sizeof(struct e1000_tx_desc)) % 128 == 0
  */
-#define EM_MIN_TXD		80
+#define EM_MIN_TXD		128
 #define EM_MAX_TXD		4096
 #define EM_DEFAULT_TXD          1024
 #define EM_DEFAULT_MULTI_TXD	4096
@@ -100,7 +100,7 @@
  *   desscriptors should meet the following condition.
  *      (num_tx_desc * sizeof(struct e1000_tx_desc)) % 128 == 0
  */
-#define EM_MIN_RXD		80
+#define EM_MIN_RXD		128
 #define EM_MAX_RXD		4096
 #define EM_DEFAULT_RXD          1024
 #define EM_DEFAULT_MULTI_RXD	4096
@@ -174,17 +174,6 @@
 #endif
 
 /*
- * This parameter controls the max duration of transmit watchdog.
- */
-#define EM_WATCHDOG                   (10 * hz)
-
-/*
- * This parameter controls when the driver calls the routine to reclaim
- * transmit descriptors.
- */
-#define EM_TX_CLEANUP_THRESHOLD	(adapter->number_of_desc / 8)
-
-/*
  * This parameter controls whether or not autonegotation is enabled.
  *              0 - Disable autonegotiation
  *              1 - Enable  autonegotiation
@@ -246,6 +235,18 @@
 #define PCICFG_DESC_RING_STATUS		0xe4
 #define FLUSH_DESC_REQUIRED		0x100
 
+
+#define IGB_RX_PTHRESH			((hw->mac.type == e1000_i354) ? 12 : \
+					  ((hw->mac.type <= e1000_82576) ? 16 : 8))
+#define IGB_RX_HTHRESH			8
+#define IGB_RX_WTHRESH			((hw->mac.type == e1000_82576 && \
+					  (adapter->intr_type == IFLIB_INTR_MSIX)) ? 1 : 4)
+
+#define IGB_TX_PTHRESH			((hw->mac.type == e1000_i354) ? 20 : 8)
+#define IGB_TX_HTHRESH			1
+#define IGB_TX_WTHRESH			((hw->mac.type != e1000_82575 && \
+                                          (adapter->intr_type == IFLIB_INTR_MSIX) ? 1 : 16)
+
 /*
  * TDBA/RDBA should be aligned on 16 byte boundary. But TDLEN/RDLEN should be
  * multiple of 128 bytes. So we align TDBA/RDBA on 128 byte boundary. This will
@@ -305,6 +306,9 @@
 #define ETH_ADDR_LEN		6
 #define CSUM_OFFLOAD		7	/* Offload bits in mbuf flag */
 
+#define IGB_PKTTYPE_MASK	0x0000FFF0
+#define IGB_DMCTLX_DCFLUSH_DIS	0x80000000  /* Disable DMA Coalesce Flush */
+
 /*
  * 82574 has a nonstandard address for EIAC
  * and since its only used in MSIX, and in
@@ -336,8 +340,6 @@ struct tx_ring {
         struct adapter          *adapter;
 	struct em_tx_queue      *que;
         u32                     me;
-        u32                     msix;
-	u32			ims;
         int			busy;
 	struct e1000_tx_desc	*tx_base;
 	uint64_t                tx_paddr; 
@@ -370,8 +372,6 @@ struct rx_ring {
         struct adapter          *adapter;
         struct em_rx_queue      *que;
         u32                     me;
-        u32                     msix;
-	u32			ims;
         u32                     payload;
         union e1000_rx_desc_extended	*rx_base;
         uint64_t                rx_paddr; 
@@ -389,18 +389,21 @@ struct rx_ring {
 };
 
 struct em_tx_queue {
-  struct adapter         *adapter;
-  u32                    me;
-  struct tx_ring         txr;
+	struct adapter         *adapter;
+        u32                     msix;
+	u32			eims;		/* This queue's EIMS bit */
+	u32                    me;
+	struct tx_ring         txr;
 };
 
 struct em_rx_queue {
-  struct adapter         *adapter;
-  u32                    me;
-  u32                    msix;
-  struct rx_ring         rxr;
-  u64                    irqs;
-  struct if_irq          que_irq; 
+	struct adapter         *adapter;
+	u32                    me;
+	u32                    msix;
+	u32                    eims;
+	struct rx_ring         rxr;
+	u64                    irqs;
+	struct if_irq          que_irq; 
 };  
 
 /* Our adapter structure */
@@ -410,8 +413,8 @@ struct adapter {
 
         if_softc_ctx_t shared;
         if_ctx_t ctx;
-#define num_tx_queues shared->isc_ntxqsets
-#define num_rx_queues shared->isc_nrxqsets
+#define tx_num_queues shared->isc_ntxqsets
+#define rx_num_queues shared->isc_nrxqsets
 #define intr_type shared->isc_intr
 	/* FreeBSD operating-system-specific structures. */
 	struct e1000_osdep osdep;
@@ -472,7 +475,12 @@ struct adapter {
 	u16		link_speed;
 	u16		link_duplex;
 	u32		smartspeed;
+	u32		dmac;
+	int		link_mask;
 
+	u64		que_mask;
+
+	
 	struct em_int_delay_info tx_int_delay;
 	struct em_int_delay_info tx_abs_int_delay;
 	struct em_int_delay_info rx_int_delay;

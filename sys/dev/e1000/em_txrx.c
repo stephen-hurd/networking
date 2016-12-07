@@ -182,7 +182,7 @@ em_transmit_checksum_setup(struct adapter *adapter, if_pkt_info_t pi, u32 *txd_u
 	 * second note.
 	 */
 	if (DONT_FORCE_CTX &&
-	    adapter->num_tx_queues == 1 &&
+	    adapter->tx_num_queues == 1 &&
 	    txr->csum_lhlen == pi->ipi_ehdrlen &&
 	    txr->csum_iphlen == pi->ipi_ip_hlen &&
 	    txr->csum_flags == csum_flags) {

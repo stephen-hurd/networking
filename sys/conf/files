@@ -1564,15 +1564,15 @@ dev/ed/if_ed_pci.c		optional ed pci
 dev/efidev/efidev.c		optional efirt
 dev/eisa/eisa_if.m		standard
 dev/eisa/eisaconf.c		optional eisa
-dev/e1000/if_em.c		optional em \
+dev/e1000/if_em.c		optional igb | em \
 	compile-with "${NORMAL_C} -I$S/dev/e1000"
-dev/e1000/em_txrx.c		optional em iflib \
+dev/e1000/em_txrx.c		optional igb iflib | em iflib  \
 	compile-with "${NORMAL_C} -I$S/dev/e1000"
 dev/e1000/if_lem.c		optional em !iflib \
 	compile-with "${NORMAL_C} -I$S/dev/e1000"
-dev/e1000/if_igb.c		optional igb \
+dev/e1000/if_igb.c		optional igb !iflib \
 	compile-with "${NORMAL_C} -I$S/dev/e1000"
-dev/e1000/igb_txrx.c		optional igb iflib \
+dev/e1000/igb_txrx.c		optional igb iflib | em iflib \
 	compile-with "${NORMAL_C} -I$S/dev/e1000"
 dev/e1000/e1000_80003es2lan.c	optional em | igb \
 	compile-with "${NORMAL_C} -I$S/dev/e1000"
