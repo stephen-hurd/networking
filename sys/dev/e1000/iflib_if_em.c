@@ -708,6 +708,7 @@ em_if_attach_pre(if_ctx_t ctx)
 		if (adapter->hw.mac.type < e1000_82543)
 			scctx->isc_capenable &= ~(IFCAP_HWCSUM|IFCAP_VLAN_HWCSUM);
 		scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_IP_TSO;
+		scctx->isc_msix_bar = 0;
 	}
 
 	/* Setup PCI resources */
