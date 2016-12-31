@@ -1858,9 +1858,7 @@ vm_map_submap(
  *	limited number of page mappings are created at the low-end of the
  *	specified address range.  (For this purpose, a superpage mapping
  *	counts as one page mapping.)  Otherwise, all resident pages within
- *	the specified address range are mapped.  Because these mappings are
- *	being created speculatively, cached pages are not reactivated and
- *	mapped.
+ *	the specified address range are mapped.
  */
 static void
 vm_map_pmap_enter(vm_map_t map, vm_offset_t addr, vm_prot_t prot,
@@ -2929,8 +2927,8 @@ vm_map_entry_delete(vm_map_t map, vm_map_entry_t entry)
 		offidxstart = OFF_TO_IDX(entry->offset);
 		offidxend = offidxstart + count;
 		VM_OBJECT_WLOCK(object);
-		if (object->ref_count != 1 &&
-		    ((object->flags & (OBJ_NOSPLIT|OBJ_ONEMAPPING)) == OBJ_ONEMAPPING ||
+		if (object->ref_count != 1 && ((object->flags & (OBJ_NOSPLIT |
+		    OBJ_ONEMAPPING)) == OBJ_ONEMAPPING ||
 		    object == kernel_object || object == kmem_object)) {
 			vm_object_collapse(object);
 
@@ -2943,7 +2941,8 @@ vm_map_entry_delete(vm_map_t map, vm_map_entry_t entry)
 			vm_object_page_remove(object, offidxstart, offidxend,
 			    OBJPR_NOTMAPPED);
 			if (object->type == OBJT_SWAP)
-				swap_pager_freespace(object, offidxstart, count);
+				swap_pager_freespace(object, offidxstart,
+				    count);
 			if (offidxend >= object->size &&
 			    offidxstart < object->size) {
 				size1 = object->size;
@@ -2951,8 +2950,9 @@ vm_map_entry_delete(vm_map_t map, vm_map_entry_t entry)
 				if (object->cred != NULL) {
 					size1 -= object->size;
 					KASSERT(object->charge >= ptoa(size1),
-					    ("vm_map_entry_delete: object->charge < 0"));
-					swap_release_by_cred(ptoa(size1), object->cred);
+					    ("object %p charge < 0", object));
+					swap_release_by_cred(ptoa(size1),
+					    object->cred);
 					object->charge -= ptoa(size1);
 				}
 			}
@@ -3170,13 +3170,15 @@ vm_map_copy_entry(
 		if ((src_object = src_entry->object.vm_object) != NULL) {
 			VM_OBJECT_WLOCK(src_object);
 			charged = ENTRY_CHARGED(src_entry);
-			if ((src_object->handle == NULL) &&
-				(src_object->type == OBJT_DEFAULT ||
-				 src_object->type == OBJT_SWAP)) {
+			if (src_object->handle == NULL &&
+			    (src_object->type == OBJT_DEFAULT ||
+			    src_object->type == OBJT_SWAP)) {
 				vm_object_collapse(src_object);
-				if ((src_object->flags & (OBJ_NOSPLIT|OBJ_ONEMAPPING)) == OBJ_ONEMAPPING) {
+				if ((src_object->flags & (OBJ_NOSPLIT |
+				    OBJ_ONEMAPPING)) == OBJ_ONEMAPPING) {
 					vm_object_split(src_entry);
-					src_object = src_entry->object.vm_object;
+					src_object =
+					    src_entry->object.vm_object;
 				}
 			}
 			vm_object_reference_locked(src_object);
@@ -3203,8 +3205,10 @@ vm_map_copy_entry(
 					*fork_charge += size;
 				}
 			}
-			src_entry->eflags |= (MAP_ENTRY_COW|MAP_ENTRY_NEEDS_COPY);
-			dst_entry->eflags |= (MAP_ENTRY_COW|MAP_ENTRY_NEEDS_COPY);
+			src_entry->eflags |= MAP_ENTRY_COW |
+			    MAP_ENTRY_NEEDS_COPY;
+			dst_entry->eflags |= MAP_ENTRY_COW |
+			    MAP_ENTRY_NEEDS_COPY;
 			dst_entry->offset = src_entry->offset;
 			if (src_entry->eflags & MAP_ENTRY_VN_WRITECNT) {
 				/*
@@ -3827,10 +3831,10 @@ Retry:
 			rv = KERN_NO_SPACE;
 		/* Grow the underlying object if applicable. */
 		else if (stack_entry->object.vm_object == NULL ||
-			 vm_object_coalesce(stack_entry->object.vm_object,
-			 stack_entry->offset,
-			 (vm_size_t)(stack_entry->end - stack_entry->start),
-			 (vm_size_t)grow_amount, cred != NULL)) {
+		    vm_object_coalesce(stack_entry->object.vm_object,
+		    stack_entry->offset,
+		    (vm_size_t)(stack_entry->end - stack_entry->start),
+		    (vm_size_t)grow_amount, cred != NULL)) {
 			map->size += (addr - stack_entry->end);
 			/* Update the current entry. */
 			stack_entry->end = addr;
@@ -4311,7 +4315,7 @@ DB_SHOW_COMMAND(procvm, procvm)
 	struct proc *p;
 
 	if (have_addr) {
-		p = (struct proc *) addr;
+		p = db_lookup_proc(addr);
 	} else {
 		p = curproc;
 	}
