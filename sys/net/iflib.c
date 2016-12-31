@@ -2889,7 +2889,7 @@ iflib_txq_can_drain(struct ifmp_ring *r)
 	iflib_txq_t txq = r->cookie;
 	if_ctx_t ctx = txq->ift_ctx;
 
-	return ((TXQ_AVAIL(txq) >= MAX_TX_DESC(ctx)) ||
+	return ((TXQ_AVAIL(txq) > MAX_TX_DESC(ctx) + 2) ||
 		ctx->isc_txd_credits_update(ctx->ifc_softc, txq->ift_id, txq->ift_cidx_processed, false));
 }
 
@@ -2964,13 +2964,13 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		if (__predict_false(!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)))
 			break;
 
-		if (desc_used > TXQ_MAX_DB_CONSUMED(txq->ift_size))
+		if (desc_used >= TXQ_MAX_DB_CONSUMED(txq->ift_size))
 			break;
 	}
 
 	if ((iflib_min_tx_latency || iflib_txq_min_occupancy(txq)) && txq->ift_db_pending)
 		iflib_txd_db_check(ctx, txq, TRUE);
-	else if ((txq->ift_db_pending || TXQ_AVAIL(txq) < MAX_TX_DESC(ctx)) &&
+	else if ((txq->ift_db_pending || TXQ_AVAIL(txq) <= MAX_TX_DESC(ctx) + 2) &&
 		 (callout_pending(&txq->ift_db_check) == 0)) {
 		txq->ift_db_pending_queued = txq->ift_db_pending;
 		callout_reset_on(&txq->ift_db_check, 1, iflib_txd_deferred_db_check,
