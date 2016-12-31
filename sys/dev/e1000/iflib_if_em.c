@@ -6,6 +6,21 @@
 #define em_mac_min e1000_82547
 #define igb_mac_min e1000_82575
 
+#if __FreeBSD_version > 1200000
+/*
+ * On 12 and later there is only em(9).
+ * On early releases we can create separate drivers using
+ * the same code by defining the configs in the corresponding
+ * Makefile. For static linking we can either create a soft
+ * link or just duplicate the file entirely.
+ */
+#define CONFIG_EM
+#define CONFIG_IGB
+#elif !defined(CONFIG_EM) && !defined(CONFIG_IGB)
+#error "CONFIG_EM or CONFIG_IGB must be defined"
+#elif defined(CONFIG_EM) && defined(CONFIG_IGB)
+#error "CONFIG_EM and CONFIG_IGB are mutually exclusive"
+#endif
 
 /*********************************************************************
  *  Driver version:
@@ -24,6 +39,7 @@ char em_driver_version[] = "7.6.1-k";
 
 static pci_vendor_info_t em_vendor_info_array[] =
 {
+#ifdef CONFIG_EM
 	/* Intel(R) PRO/1000 Network Connection - Legacy em*/
 	PVID(0x8086, E1000_DEV_ID_82540EM,  "Intel(R) PRO/1000 Network Connection"), 
 	PVID(0x8086, E1000_DEV_ID_82540EM_LOM, "Intel(R) PRO/1000 Network Connection"), 
@@ -134,7 +150,8 @@ static pci_vendor_info_t em_vendor_info_array[] =
 	PVID(0x8086, E1000_DEV_ID_PCH_SPT_I219_LM2, "Intel(R) PRO/1000 Network Connection"),
 	PVID(0x8086, E1000_DEV_ID_PCH_SPT_I219_V2, "Intel(R) PRO/1000 Network Connection"),
 	PVID(0x8086, E1000_DEV_ID_PCH_LBG_I219_LM3, "Intel(R) PRO/1000 Network Connection"),
-
+#endif
+#if defined(CONFIG_IGB)
 	/* Intel(R) PRO/1000 Network Connection - em */
 	PVID(0x8086, E1000_DEV_ID_82575EB_COPPER, "Intel(R) PRO/1000 PCI-Express Network Driver"),
 	PVID(0x8086, E1000_DEV_ID_82575EB_FIBER_SERDES, "Intel(R) PRO/1000 PCI-Express Network Driver"),
@@ -175,6 +192,7 @@ static pci_vendor_info_t em_vendor_info_array[] =
 	PVID(0x8086, E1000_DEV_ID_I354_BACKPLANE_1GBPS, "Intel(R) PRO/1000 PCI-Express Network Driver"),
 	PVID(0x8086, E1000_DEV_ID_I354_BACKPLANE_2_5GBPS, "Intel(R) PRO/1000 PCI-Express Network Driver"),
 	PVID(0x8086, E1000_DEV_ID_I354_SGMII, "Intel(R) PRO/1000 PCI-Express Network Driver"),
+#endif
 	/* required last entry */
 	PVID_END
 };
@@ -279,6 +297,7 @@ static device_method_t em_methods[] = {
   DEVMETHOD_END
 };
 
+#if defined(CONFIG_EM)
 static driver_t em_driver = {
 	"em", em_methods, sizeof(struct adapter),
 };
@@ -288,7 +307,21 @@ DRIVER_MODULE(em, pci, em_driver, em_devclass, 0, 0);
 
 MODULE_DEPEND(em, pci, 1, 1, 1);
 MODULE_DEPEND(em, ether, 1, 1, 1);
-MODULE_DEPEND(em, iflib, 1, 1, 1); 
+MODULE_DEPEND(em, iflib, 1, 1, 1);
+#elif defined(CONFIG_IGB)
+static driver_t igb_driver = {
+	"igb", em_methods, sizeof(struct adapter),
+};
+
+static devclass_t igb_devclass;
+DRIVER_MODULE(igb, pci, em_driver, igb_devclass, 0, 0);
+
+MODULE_DEPEND(igb, pci, 1, 1, 1);
+MODULE_DEPEND(igb, ether, 1, 1, 1);
+MODULE_DEPEND(igb, iflib, 1, 1, 1);
+#else
+#error "CONFIG_EM and CONFIG_IGB not defined"
+#endif
 
 static device_method_t em_if_methods[] = {
         DEVMETHOD(ifdi_attach_pre, em_if_attach_pre),
