@@ -1419,8 +1419,6 @@ iflib_txq_setup(iflib_txq_t txq)
 	iflib_dma_info_t di;
 	int i;
 
-	device_printf(ctx->ifc_dev, "iflib_txq_setup\n");
-
 	/* Set number of descriptors available */
 	txq->ift_qstatus = IFLIB_QUEUE_IDLE;
 

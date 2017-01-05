@@ -678,8 +678,8 @@ bnxt_attach_pre(if_ctx_t ctx)
 		goto failed;
 	iflib_set_mac(ctx, softc->func.mac_addr);
 
-	/* TODO: Test with CSUM_IP */
-	scctx->isc_tx_csum_flags = (CSUM_TCP | CSUM_UDP |
+	scctx->isc_txrx = &bnxt_txrx;
+	scctx->isc_tx_csum_flags = (CSUM_IP | CSUM_TCP | CSUM_UDP |
 	    CSUM_TCP_IPV6 | CSUM_UDP_IPV6 | CSUM_TSO);
 	scctx->isc_capenable =
 	    /* These are translated to hwassit bits */
