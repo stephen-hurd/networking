@@ -6,22 +6,6 @@
 #define em_mac_min e1000_82547
 #define igb_mac_min e1000_82575
 
-#if __FreeBSD_version > 1200000
-/*
- * On 12 and later there is only em(9).
- * On early releases we can create separate drivers using
- * the same code by defining the configs in the corresponding
- * Makefile. For static linking we can either create a soft
- * link or just duplicate the file entirely.
- */
-#define CONFIG_EM
-#define CONFIG_IGB
-#elif !defined(CONFIG_EM) && !defined(CONFIG_IGB)
-#error "CONFIG_EM or CONFIG_IGB must be defined"
-#elif defined(CONFIG_EM) && defined(CONFIG_IGB)
-#error "CONFIG_EM and CONFIG_IGB are mutually exclusive"
-#endif
-
 /*********************************************************************
  *  Driver version:
  *********************************************************************/
@@ -39,7 +23,6 @@ char em_driver_version[] = "7.6.1-k";
 
 static pci_vendor_info_t em_vendor_info_array[] =
 {
-#ifdef CONFIG_EM
 	/* Intel(R) PRO/1000 Network Connection - Legacy em*/
 	PVID(0x8086, E1000_DEV_ID_82540EM,  "Intel(R) PRO/1000 Network Connection"), 
 	PVID(0x8086, E1000_DEV_ID_82540EM_LOM, "Intel(R) PRO/1000 Network Connection"), 
@@ -150,8 +133,12 @@ static pci_vendor_info_t em_vendor_info_array[] =
 	PVID(0x8086, E1000_DEV_ID_PCH_SPT_I219_LM2, "Intel(R) PRO/1000 Network Connection"),
 	PVID(0x8086, E1000_DEV_ID_PCH_SPT_I219_V2, "Intel(R) PRO/1000 Network Connection"),
 	PVID(0x8086, E1000_DEV_ID_PCH_LBG_I219_LM3, "Intel(R) PRO/1000 Network Connection"),
-#endif
-#if defined(CONFIG_IGB)
+	/* required last entry */
+	PVID_END
+};
+
+static pci_vendor_info_t igb_vendor_info_array[] =
+{
 	/* Intel(R) PRO/1000 Network Connection - em */
 	PVID(0x8086, E1000_DEV_ID_82575EB_COPPER, "Intel(R) PRO/1000 PCI-Express Network Driver"),
 	PVID(0x8086, E1000_DEV_ID_82575EB_FIBER_SERDES, "Intel(R) PRO/1000 PCI-Express Network Driver"),
@@ -192,7 +179,6 @@ static pci_vendor_info_t em_vendor_info_array[] =
 	PVID(0x8086, E1000_DEV_ID_I354_BACKPLANE_1GBPS, "Intel(R) PRO/1000 PCI-Express Network Driver"),
 	PVID(0x8086, E1000_DEV_ID_I354_BACKPLANE_2_5GBPS, "Intel(R) PRO/1000 PCI-Express Network Driver"),
 	PVID(0x8086, E1000_DEV_ID_I354_SGMII, "Intel(R) PRO/1000 PCI-Express Network Driver"),
-#endif
 	/* required last entry */
 	PVID_END
 };
@@ -201,6 +187,7 @@ static pci_vendor_info_t em_vendor_info_array[] =
  *  Function prototypes
  *********************************************************************/
 static void     *em_register(device_t dev); 
+static void     *igb_register(device_t dev); 
 static int	em_if_attach_pre(if_ctx_t ctx);
 static int	em_if_attach_post(if_ctx_t ctx);
 static int	em_if_detach(if_ctx_t ctx);
@@ -297,7 +284,19 @@ static device_method_t em_methods[] = {
   DEVMETHOD_END
 };
 
-#if defined(CONFIG_EM)
+static device_method_t igb_methods[] = {
+	/* Device interface */
+  DEVMETHOD(device_register, igb_register),
+  DEVMETHOD(device_probe, iflib_device_probe), 
+  DEVMETHOD(device_attach, iflib_device_attach),
+  DEVMETHOD(device_detach, iflib_device_detach),
+  DEVMETHOD(device_shutdown, iflib_device_shutdown),
+  DEVMETHOD(device_suspend, iflib_device_suspend),
+  DEVMETHOD(device_resume, iflib_device_resume),
+  DEVMETHOD_END
+};
+
+
 static driver_t em_driver = {
 	"em", em_methods, sizeof(struct adapter),
 };
@@ -308,20 +307,18 @@ DRIVER_MODULE(em, pci, em_driver, em_devclass, 0, 0);
 MODULE_DEPEND(em, pci, 1, 1, 1);
 MODULE_DEPEND(em, ether, 1, 1, 1);
 MODULE_DEPEND(em, iflib, 1, 1, 1);
-#elif defined(CONFIG_IGB)
+
 static driver_t igb_driver = {
-	"igb", em_methods, sizeof(struct adapter),
+	"igb", igb_methods, sizeof(struct adapter),
 };
 
 static devclass_t igb_devclass;
-DRIVER_MODULE(igb, pci, em_driver, igb_devclass, 0, 0);
+DRIVER_MODULE(igb, pci, igb_driver, igb_devclass, 0, 0);
 
 MODULE_DEPEND(igb, pci, 1, 1, 1);
 MODULE_DEPEND(igb, ether, 1, 1, 1);
 MODULE_DEPEND(igb, iflib, 1, 1, 1);
-#else
-#error "CONFIG_EM and CONFIG_IGB not defined"
-#endif
+
 
 static device_method_t em_if_methods[] = {
         DEVMETHOD(ifdi_attach_pre, em_if_attach_pre),
@@ -465,6 +462,34 @@ static struct if_shared_ctx em_sctx_init = {
   
 if_shared_ctx_t em_sctx = &em_sctx_init;
 
+
+static struct if_shared_ctx igb_sctx_init = {
+    	.isc_magic = IFLIB_MAGIC,
+	.isc_q_align = PAGE_SIZE,
+	.isc_tx_maxsize = EM_TSO_SIZE,
+	.isc_tx_maxsegsize = PAGE_SIZE,
+	.isc_rx_maxsize = MJUM9BYTES,
+	.isc_rx_nsegments = 1,
+	.isc_rx_maxsegsize = MJUM9BYTES,
+	.isc_nfl = 1,
+	.isc_nrxqs = 1,
+	.isc_ntxqs = 1,
+	.isc_admin_intrcnt = 1,
+	.isc_vendor_info = igb_vendor_info_array,
+	.isc_driver_version = em_driver_version,
+	.isc_driver = &em_if_driver,
+	.isc_flags = IFLIB_NEED_SCRATCH | IFLIB_TSO_INIT_IP,
+
+	.isc_nrxd_min = {EM_MIN_RXD},
+	.isc_ntxd_min = {EM_MIN_TXD},
+	.isc_nrxd_max = {EM_MAX_RXD},
+	.isc_ntxd_max = {EM_MAX_TXD},
+	.isc_nrxd_default = {EM_DEFAULT_RXD},
+	.isc_ntxd_default = {EM_DEFAULT_TXD},
+};
+  
+if_shared_ctx_t igb_sctx = &igb_sctx_init;
+
 /*****************************************************************
  *
  * Dump Registers
@@ -583,6 +608,12 @@ static void *
 em_register(device_t dev)
 {
 	return (em_sctx); 
+}
+
+static void *
+igb_register(device_t dev)
+{
+	return (igb_sctx); 
 }
 
 static void
