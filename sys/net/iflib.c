@@ -3181,7 +3181,6 @@ iflib_if_transmit(if_t ifp, struct mbuf *m)
 	 */
 	txq = &ctx->ifc_txqs[qidx];
 
-#ifdef DRIVER_BACKPRESSURE
 	if (txq->ift_closed) {
 		while (m != NULL) {
 			next = m->m_nextpkt;
@@ -3191,7 +3190,6 @@ iflib_if_transmit(if_t ifp, struct mbuf *m)
 		}
 		return (ENOBUFS);
 	}
-#endif
 #ifdef notyet
 	qidx = count = 0;
 	mp = marr;
@@ -3220,10 +3218,7 @@ iflib_if_transmit(if_t ifp, struct mbuf *m)
 
 	if (err) {
 		GROUPTASK_ENQUEUE(&txq->ift_task);
-		/* support forthcoming later */
-#ifdef DRIVER_BACKPRESSURE
 		txq->ift_closed = TRUE;
-#endif
 		ifmp_ring_check_drainage(txq->ift_br[0], TX_BATCH_SIZE);
 		m_freem(m);
 	} else if (TXQ_AVAIL(txq) < (txq->ift_size >> 1)) {
