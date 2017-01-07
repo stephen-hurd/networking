@@ -3384,7 +3384,7 @@ ixl_setup_stations(struct ixl_pf *pf)
        		}
 		/* Allocate a buf ring */
 		txr->br = buf_ring_alloc(4096, M_DEVBUF,
-		    M_NOWAIT, &txr->mtx);
+					 M_NOWAIT, &txr->mtx, 0, 1);
 		if (txr->br == NULL) {
 			device_printf(dev,
 			    "Critical Failure setting up TX buf ring\n");

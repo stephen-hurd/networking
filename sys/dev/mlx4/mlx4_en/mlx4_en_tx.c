@@ -107,7 +107,7 @@ int mlx4_en_create_tx_ring(struct mlx4_en_priv *priv,
 
 	/* Allocate the buf ring */
 	ring->br = buf_ring_alloc(MLX4_EN_DEF_TX_QUEUE_SIZE, M_DEVBUF,
-		M_WAITOK, &ring->tx_lock.m);
+				  M_WAITOK, &ring->tx_lock.m, 0, 1);
 	if (ring->br == NULL) {
 		en_err(priv, "Failed allocating tx_info ring\n");
 		err = -ENOMEM;

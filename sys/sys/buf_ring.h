@@ -35,6 +35,7 @@
 #if defined(INVARIANTS) && !defined(DEBUG_BUFRING)
 #define DEBUG_BUFRING 1
 #endif
+extern void	if_rexmt_start(int qid, int nqs);
 
 #ifdef DEBUG_BUFRING
 #include <sys/lock.h>
@@ -51,11 +52,17 @@ struct buf_ring {
 	volatile uint32_t	br_cons_tail;
 	int		 	br_cons_size;
 	int              	br_cons_mask;
+	int              	br_id;
+	int              	br_nqs;
+	int              	br_closed;
 #ifdef DEBUG_BUFRING
 	struct mtx		*br_lock;
 #endif	
 	void			*br_ring[0] __aligned(CACHE_LINE_SIZE);
 };
+
+
+static __inline int buf_ring_count(struct buf_ring *br);
 
 /*
  * multi-producer safe lock-free ring buffer enqueue
@@ -84,6 +91,7 @@ buf_ring_enqueue(struct buf_ring *br, void *buf)
 			if (prod_head == br->br_prod_head &&
 			    cons_tail == br->br_cons_tail) {
 				br->br_drops++;
+				br->br_closed = TRUE;
 				critical_exit();
 				return (ENOBUFS);
 			}
@@ -119,6 +127,10 @@ buf_ring_dequeue_mc(struct buf_ring *br)
 	void *buf;
 
 	critical_enter();
+	if (br->br_closed == TRUE) {
+		critical_exit();
+		return (NULL);
+	}
 	do {
 		cons_head = br->br_cons_head;
 		cons_next = (cons_head + 1) & br->br_cons_mask;
@@ -143,6 +155,10 @@ buf_ring_dequeue_mc(struct buf_ring *br)
 
 	atomic_store_rel_int(&br->br_cons_tail, cons_next);
 	critical_exit();
+	if (br->br_closed == TRUE && buf_ring_count(br) < (br->br_prod_size >> 1)) {
+		br->br_closed = FALSE;
+		if_rexmt_start(br->br_id, br->br_nqs);
+	}
 
 	return (buf);
 }
@@ -221,6 +237,11 @@ buf_ring_dequeue_sc(struct buf_ring *br)
 		    br->br_cons_tail, cons_head);
 #endif
 	br->br_cons_tail = cons_next;
+	if (br->br_closed == TRUE && buf_ring_count(br) < (br->br_prod_size >> 1)) {
+		br->br_closed = FALSE;
+		if_rexmt_start(br->br_id, br->br_nqs);
+	}
+
 	return (buf);
 }
 
@@ -351,7 +372,7 @@ buf_ring_count(struct buf_ring *br)
 }
 
 struct buf_ring *buf_ring_alloc(int count, struct malloc_type *type, int flags,
-    struct mtx *);
+				struct mtx *, int, int);
 void buf_ring_free(struct buf_ring *br, struct malloc_type *type);
 
 

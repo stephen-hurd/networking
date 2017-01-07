@@ -2223,7 +2223,7 @@ ixgbe_allocate_queues(struct adapter *adapter)
 #ifndef IXGBE_LEGACY_TX
 		/* Allocate a buf ring */
 		txr->br = buf_ring_alloc(IXGBE_BR_SIZE, M_DEVBUF,
-		    M_WAITOK, &txr->tx_mtx);
+					 M_WAITOK, &txr->tx_mtx, 0, 1);
 		if (txr->br == NULL) {
 			device_printf(dev,
 			    "Critical Failure setting up buf ring\n");

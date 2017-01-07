@@ -37,7 +37,7 @@ __FBSDID("$FreeBSD$");
 
 
 struct buf_ring *
-buf_ring_alloc(int count, struct malloc_type *type, int flags, struct mtx *lock)
+buf_ring_alloc(int count, struct malloc_type *type, int flags, struct mtx *lock, int id, int nqs)
 {
 	struct buf_ring *br;
 
@@ -54,7 +54,9 @@ buf_ring_alloc(int count, struct malloc_type *type, int flags, struct mtx *lock)
 	br->br_prod_mask = br->br_cons_mask = count-1;
 	br->br_prod_head = br->br_cons_head = 0;
 	br->br_prod_tail = br->br_cons_tail = 0;
-		
+	br->br_id = id;
+	br->br_nqs = nqs;
+	
 	return (br);
 }
 

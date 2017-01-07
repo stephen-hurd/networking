@@ -15693,7 +15693,7 @@ bxe_alloc_buf_rings(struct bxe_softc *sc)
         fp = &sc->fp[i];
 
         fp->tx_br = buf_ring_alloc(BXE_BR_SIZE, M_DEVBUF,
-                                   M_NOWAIT, &fp->tx_mtx);
+				   M_NOWAIT, &fp->tx_mtx, i, sc->num_queues);
         if (fp->tx_br == NULL)
             return (-1);
     }

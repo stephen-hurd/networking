@@ -3431,7 +3431,7 @@ hn_tx_ring_create(struct hn_softc *sc, int id)
 	SLIST_INIT(&txr->hn_txlist);
 #else
 	txr->hn_txdesc_br = buf_ring_alloc(txr->hn_txdesc_cnt, M_DEVBUF,
-	    M_WAITOK, &txr->hn_tx_lock);
+					   M_WAITOK, &txr->hn_tx_lock, 0, 1);
 #endif
 
 	if (hn_tx_taskq_mode == HN_TX_TASKQ_M_EVTTQ) {
@@ -3457,7 +3457,7 @@ hn_tx_ring_create(struct hn_softc *sc, int id)
 
 		br_depth = hn_get_txswq_depth(txr);
 		txr->hn_mbuf_br = buf_ring_alloc(br_depth, M_DEVBUF,
-		    M_WAITOK, &txr->hn_tx_lock);
+						 M_WAITOK, &txr->hn_tx_lock, 0, 1);
 	}
 
 	txr->hn_direct_tx_size = hn_direct_tx_size;

@@ -2328,7 +2328,7 @@ al_eth_setup_tx_resources(struct al_eth_adapter *adapter, int qid)
 	/* Allocate Ring Queue */
 	mtx_init(&tx_ring->br_mtx, "AlRingMtx", NULL, MTX_DEF);
 	tx_ring->br = buf_ring_alloc(AL_BR_SIZE, M_DEVBUF, M_WAITOK,
-	    &tx_ring->br_mtx);
+				     &tx_ring->br_mtx, 0, 1);
 	if (tx_ring->br == NULL) {
 		device_printf(dev, "Critical Failure setting up buf ring\n");
 		return (ENOMEM);

@@ -926,7 +926,7 @@ nicvf_init_cmp_queue(struct nicvf *nic, struct cmp_queue *cq, int q_len,
 	nic->cq_coalesce_usecs = (CMP_QUEUE_TIMER_THRESH * 0.05) - 1;
 
 	cq->rx_br = buf_ring_alloc(CMP_QUEUE_LEN * 8, M_DEVBUF, M_WAITOK,
-	    &cq->mtx);
+				   &cq->mtx, qidx, nic->qs->sq_len);
 
 	/* Allocate taskqueue */
 	TASK_INIT(&cq->cmp_task, 0, nicvf_cmp_task, cq);

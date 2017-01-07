@@ -132,6 +132,12 @@ SYSCTL_INT(_net_inet_tcp, OID_AUTO, sendbuf_max, CTLFLAG_VNET | CTLFLAG_RW,
 	&VNET_NAME(tcp_autosndbuf_max), 0,
 	"Max size of automatic send buffer");
 
+VNET_DEFINE(int, tcp_output_enobufs) = 0;
+#define        V_tcp_output_enobufs    VNET(tcp_output_enobufs)
+SYSCTL_INT(_net_inet_tcp, OID_AUTO, tcp_output_enobufs, CTLFLAG_VNET | CTLFLAG_RW,
+       &VNET_NAME(tcp_output_enobufs), 0,
+       "number of times ENOBUFS returned");
+
 /*
  * Make sure that either retransmit or persist timer is set for SYN, FIN and
  * non-ACK.
@@ -182,6 +188,14 @@ cc_after_idle(struct tcpcb *tp)
 
 	if (CC_ALGO(tp)->after_idle != NULL)
 		CC_ALGO(tp)->after_idle(tp->ccv);
+}
+
+
+static void
+tcp_rexmt_output(struct inpcb *inp)
+{
+
+	(void) tcp_output(inp->inp_ppcb);
 }
 
 /*
@@ -1571,7 +1585,8 @@ timer:
 			return (error);
 		case ENOBUFS:
 			TCP_XMIT_TIMER_ASSERT(tp, len, flags);
-			tp->snd_cwnd = tp->t_maxseg;
+			atomic_add_int(&V_tcp_output_enobufs, 1);
+			inp_rexmt_enqueue(tp->t_inpcb, tcp_rexmt_output);
 			return (0);
 		case EMSGSIZE:
 			/*

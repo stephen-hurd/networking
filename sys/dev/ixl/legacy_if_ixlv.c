@@ -1653,7 +1653,7 @@ ixlv_setup_queues(struct ixlv_sc *sc)
 		}
 		/* Allocate a buf ring */
 		txr->br = buf_ring_alloc(ixlv_txbrsz, M_DEVBUF,
-		    M_WAITOK, &txr->mtx);
+					 M_WAITOK, &txr->mtx, 0, 1);
 		if (txr->br == NULL) {
 			device_printf(dev,
 			    "Critical Failure setting up TX buf ring\n");

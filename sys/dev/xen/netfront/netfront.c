@@ -835,7 +835,7 @@ setup_txqs(device_t dev, struct netfront_info *info,
 		}
 
 		txq->br = buf_ring_alloc(NET_TX_RING_SIZE, M_DEVBUF,
-		    M_WAITOK, &txq->lock);
+					 M_WAITOK, &txq->lock, q, num_queues);
 		TASK_INIT(&txq->defrtask, 0, xn_txq_tq_deferred, txq);
 
 		txq->tq = taskqueue_create(txq->name, M_WAITOK,

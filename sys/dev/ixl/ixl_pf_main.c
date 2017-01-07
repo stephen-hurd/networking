@@ -2232,7 +2232,7 @@ ixl_setup_queue(struct ixl_queue *que, struct ixl_pf *pf, int index)
 	}
 	/* Allocate a buf ring */
 	txr->br = buf_ring_alloc(DEFAULT_TXBRSZ, M_DEVBUF,
-	    M_NOWAIT, &txr->mtx);
+				 M_NOWAIT, &txr->mtx, 0, 1);
 	if (txr->br == NULL) {
 		device_printf(dev,
 		    "Critical Failure setting up TX buf ring\n");

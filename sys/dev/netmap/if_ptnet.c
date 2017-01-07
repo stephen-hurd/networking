@@ -375,7 +375,7 @@ ptnet_attach(device_t dev)
 		} else {
 			/* TX queue: allocate buf_ring. */
 			pq->bufring = buf_ring_alloc(PTNET_BUF_RING_SIZE,
-						M_DEVBUF, M_NOWAIT, &pq->lock);
+						     M_DEVBUF, M_NOWAIT, &pq->lock, i, sc->num_rings);
 			if (pq->bufring == NULL) {
 				err = ENOMEM;
 				goto err_path;

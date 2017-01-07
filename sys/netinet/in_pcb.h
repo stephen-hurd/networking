@@ -162,6 +162,7 @@ struct	icmp6_filter;
  * (p) - Protected by the pcbinfo lock for the inpcb
  * (l) - Protected by the pcblist lock for the inpcb
  * (h) - Protected by the pcbhash lock for the inpcb
+ * (r) - Protected by the rexmt lock
  * (s) - Protected by another subsystem's locks
  * (x) - Undefined locking
  *
@@ -247,6 +248,9 @@ struct inpcb {
 	} inp_rtu;
 #define inp_route inp_rtu.inpu_route
 #define inp_route6 inp_rtu.inpu_route6
+	STAILQ_ENTRY(inpcb) inp_rexmt_entry;    /* (i/) */
+	void (*inp_rexmt) (struct inpcb *);
+
 };
 #define	inp_fport	inp_inc.inc_fport
 #define	inp_lport	inp_inc.inc_lport
@@ -616,6 +620,7 @@ short	inp_so_options(const struct inpcb *inp);
 #define	INP_RSS_BUCKET_SET	0x00000080 /* IP_RSS_LISTEN_BUCKET is set */
 #define	INP_RECVFLOWID		0x00000100 /* populate recv datagram with flow info */
 #define	INP_RECVRSSBUCKETID	0x00000200 /* populate recv datagram with bucket id */
+#define	INP_IN_REXMTQ		0x00000400 /* inpcb is referenced by the pcpu rexmit q */
 
 /*
  * Flags passed to in_pcblookup*() functions.
@@ -736,6 +741,9 @@ int	in_getsockaddr(struct socket *so, struct sockaddr **nam);
 struct sockaddr *
 	in_sockaddr(in_port_t port, struct in_addr *addr);
 void	in_pcbsosetlabel(struct socket *so);
+void	inp_rexmt_enqueue(struct inpcb *inp, void (*inp_rexmt) (struct inpcb *));
+void	inp_rexmt_start(uint32_t qid, uint32_t nqs);
+void	inp_rexmt_stop(struct inpcb *inp);
 #endif /* _KERNEL */
 
 #endif /* !_NETINET_IN_PCB_H_ */

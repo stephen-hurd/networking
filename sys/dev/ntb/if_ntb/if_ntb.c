@@ -158,7 +158,7 @@ ntb_net_attach(device_t dev)
 			break;
 		sc->mtu = imin(sc->mtu, ntb_transport_max_size(q->qp));
 		mtx_init(&q->tx_lock, "ntb tx", NULL, MTX_DEF);
-		q->br = buf_ring_alloc(4096, M_DEVBUF, M_WAITOK, &q->tx_lock);
+		q->br = buf_ring_alloc(4096, M_DEVBUF, M_WAITOK, &q->tx_lock, i, sc->num_queues);
 		TASK_INIT(&q->tx_task, 0, ntb_handle_tx, q);
 		q->tx_tq = taskqueue_create_fast("ntb_txq", M_NOWAIT,
 		    taskqueue_thread_enqueue, &q->tx_tq);
