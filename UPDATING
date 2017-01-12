@@ -17,6 +17,10 @@ the tip of head, and then rebuild without this option. The bootstrap process
 from older version of current across the gcc/clang cutover is a bit fragile.
 
 
+20170112:
+	The EM_MULTIQUEUE kernel configuration option is deprecated now that
+	the em(4) driver conforms to iflib specifications.
+
 20170109:
 	The igb(4), em(4) and lem(4) ethernet drivers are now implemented via
 	IFLIB.  If you have a custom kernel configuration that excludes em(4)
