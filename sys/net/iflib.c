@@ -2010,14 +2010,12 @@ iflib_stop(if_ctx_t ctx)
 static inline void
 prefetch_pkts(iflib_fl_t fl, int cidx)
 {
-	int nextptr, next;
+	int nextptr;
 	int nrxd = fl->ifl_size;
 
 	nextptr = (cidx + CACHE_PTR_INCREMENT) & (nrxd-1);
 	prefetch(&fl->ifl_sds.ifsd_m[nextptr]);
 	prefetch(&fl->ifl_sds.ifsd_cl[nextptr]);
-	next = (cidx + CACHE_LINE_SIZE) & (nrxd-1);
-	prefetch(&fl->ifl_sds.ifsd_flags[next]);
 	prefetch(fl->ifl_sds.ifsd_m[(cidx + 1) & (nrxd-1)]);
 	prefetch(fl->ifl_sds.ifsd_m[(cidx + 2) & (nrxd-1)]);
 	prefetch(fl->ifl_sds.ifsd_m[(cidx + 3) & (nrxd-1)]);
@@ -2052,6 +2050,8 @@ rxd_frag_to_sd(iflib_rxq_t rxq, if_rxd_frag_t irf, int *cltype, int unload, ifli
 		prefetch(&fl->ifl_sds.ifsd_map[next]);
 		map = fl->ifl_sds.ifsd_map[cidx];
 		di = fl->ifl_ifdi;
+		next = (cidx + CACHE_LINE_SIZE) & (fl->ifl_size-1);
+		prefetch(&fl->ifl_sds.ifsd_flags[next]);
 		bus_dmamap_sync(di->idi_tag, di->idi_map,
 				BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 
