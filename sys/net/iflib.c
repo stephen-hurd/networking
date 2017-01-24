@@ -2007,6 +2007,27 @@ iflib_stop(if_ctx_t ctx)
 	}
 }
 
+static inline void
+prefetch_pkts(iflib_fl_t fl, int cidx)
+{
+	int nextptr, next;
+	int nrxd = fl->ifl_size;
+
+	nextptr = (cidx + CACHE_PTR_INCREMENT) & (nrxd-1);
+	prefetch(&fl->ifl_sds.ifsd_m[nextptr]);
+	prefetch(&fl->ifl_sds.ifsd_cl[nextptr]);
+	next = (cidx + CACHE_LINE_SIZE) & (nrxd-1);
+	prefetch(&fl->ifl_sds.ifsd_flags[next]);
+	prefetch(fl->ifl_sds.ifsd_m[(cidx + 1) & (nrxd-1)]);
+	prefetch(fl->ifl_sds.ifsd_m[(cidx + 2) & (nrxd-1)]);
+	prefetch(fl->ifl_sds.ifsd_m[(cidx + 3) & (nrxd-1)]);
+	prefetch(fl->ifl_sds.ifsd_m[(cidx + 4) & (nrxd-1)]);
+	prefetch(fl->ifl_sds.ifsd_cl[(cidx + 1) & (nrxd-1)]);
+	prefetch(fl->ifl_sds.ifsd_cl[(cidx + 2) & (nrxd-1)]);
+	prefetch(fl->ifl_sds.ifsd_cl[(cidx + 3) & (nrxd-1)]);
+	prefetch(fl->ifl_sds.ifsd_cl[(cidx + 4) & (nrxd-1)]);
+}
+
 static void
 rxd_frag_to_sd(iflib_rxq_t rxq, if_rxd_frag_t irf, int *cltype, int unload, iflib_fl_t *pfl, int *pcidx)
 {
@@ -2014,6 +2035,7 @@ rxd_frag_to_sd(iflib_rxq_t rxq, if_rxd_frag_t irf, int *cltype, int unload, ifli
 	bus_dmamap_t map;
 	iflib_fl_t fl;
 	iflib_dma_info_t di;
+	int next;
 
 	flid = irf->irf_flid;
 	cidx = irf->irf_idx;
@@ -2024,7 +2046,10 @@ rxd_frag_to_sd(iflib_rxq_t rxq, if_rxd_frag_t irf, int *cltype, int unload, ifli
 	if (cltype)
 		fl->ifl_cl_dequeued++;
 #endif
+	prefetch_pkts(fl, cidx);
 	if (fl->ifl_sds.ifsd_map != NULL) {
+		next = (cidx + CACHE_PTR_INCREMENT) & (fl->ifl_size-1);
+		prefetch(&fl->ifl_sds.ifsd_map[next]);
 		map = fl->ifl_sds.ifsd_map[cidx];
 		di = fl->ifl_ifdi;
 		bus_dmamap_sync(di->idi_tag, di->idi_map,
