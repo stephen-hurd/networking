@@ -281,7 +281,7 @@ typedef struct iflib_sw_tx_desc_array {
 /* magic number that should be high enough for any hardware */
 #define IFLIB_MAX_TX_SEGS		128
 #define IFLIB_MAX_RX_SEGS		32
-#define IFLIB_RX_COPY_THRESH		128
+#define IFLIB_RX_COPY_THRESH		63
 #define IFLIB_MAX_RX_REFRESH		32
 #define IFLIB_QUEUE_IDLE		0
 #define IFLIB_QUEUE_HUNG		1
