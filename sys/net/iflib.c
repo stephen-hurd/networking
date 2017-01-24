@@ -3645,16 +3645,8 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 #endif
 
 	msix_bar = scctx->isc_msix_bar;
-
-	if(sctx->isc_flags & IFLIB_HAS_TXCQ)
-		main_txq = 1;
-	else
-		main_txq = 0;
-
-	if(sctx->isc_flags & IFLIB_HAS_RXCQ)
-		main_rxq = 1;
-	else
-		main_rxq = 0;
+	main_txq = (sctx->isc_flags & IFLIB_HAS_TXCQ) ? 1 : 0;
+	main_rxq = (sctx->isc_flags & IFLIB_HAS_RXCQ) ? 1 : 0;
 
 	/* XXX change for per-queue sizes */
 	device_printf(dev, "using %d tx descriptors and %d rx descriptors\n",
