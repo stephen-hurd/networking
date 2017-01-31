@@ -1187,13 +1187,36 @@ iflib_dma_free_multi(iflib_dma_info_t *dmalist, int count)
 		iflib_dma_free(*dmaiter);
 }
 
+#ifdef EARLY_AP_STARTUP
+static const int iflib_started = 1;
+#else
+/*
+ * We used to abuse the smp_started flag to decide if the queues have been
+ * fully initialized (by late taskqgroup_adjust() calls in a SYSINIT()).
+ * That gave bad races, since the SYSINIT() runs strictly after smp_started
+ * is set.  Run a SYSINIT() strictly after that to just set a usable
+ * completion flag.
+ */
+
+static int iflib_started;
+
+static void
+iflib_record_started(void *arg)
+{
+	iflib_started = 1;
+}
+
+SYSINIT(iflib_record_started, SI_SUB_SMP + 1, SI_ORDER_FIRST,
+	iflib_record_started, NULL);
+#endif
+
 static int
 iflib_fast_intr(void *arg)
 {
 	iflib_filter_info_t info = arg;
 	struct grouptask *gtask = info->ifi_task;
 
-	if (!smp_started && mp_ncpus > 1)
+	if (!iflib_started)
 		return (FILTER_HANDLED);
 
 	DBG_COUNTER_INC(fast_intrs);
@@ -1513,6 +1536,7 @@ iflib_rxsd_alloc(iflib_rxq_t rxq)
 				goto fail;
 			}
 		}
+#endif
 	}
 #endif
 	return (0);
@@ -3769,6 +3793,10 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 	if (sctx->isc_flags & IFLIB_SKIP_MSIX) {
 		msix = scctx->isc_vectors;
 	} else if (scctx->isc_msix_bar != 0)
+	       /*
+		* The simple fact that isc_msix_bar is not 0 does not mean we
+		* we have a good value there that is known to work.
+		*/
 		msix = iflib_msix_init(ctx);
 	else {
 		scctx->isc_vectors = 1;
@@ -3788,6 +3816,16 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 		goto fail_queues;
 	}
 
+	/*
+	 * Group taskqueues aren't properly set up until SMP is started,
+	 * so we disable interrupts until we can handle them post
+	 * SI_SUB_SMP.
+	 *
+	 * XXX: disabling interrupts doesn't actually work, at least for
+	 * the non-MSI case.  When they occur before SI_SUB_SMP completes,
+	 * we do null handling and depend on this not causing too large an
+	 * interrupt storm.
+	 */
 	IFDI_INTR_DISABLE(ctx);
 	if (msix > 1 && (err = IFDI_MSIX_INTR_ASSIGN(ctx, msix)) != 0) {
 		device_printf(dev, "IFDI_MSIX_INTR_ASSIGN failed %d\n", err);
@@ -4615,13 +4653,6 @@ iflib_legacy_setup(if_ctx_t ctx, driver_filter_t filter, void *filter_arg, int *
 	void *q;
 	int err;
 
-	/*
-	 * group taskqueues aren't properly set up until SMP is started
-	 * so we disable interrupts until we can handle them post
-	 * SI_SUB_SMP
-	 */
-	IFDI_INTR_DISABLE(ctx);
-
 	q = &ctx->ifc_rxqs[0];
 	info = &rxq[0].ifr_filter_info;
 	gtask = &rxq[0].ifr_task;
@@ -4810,18 +4841,20 @@ iflib_msix_init(if_ctx_t ctx)
 	** successfully initialize us.
 	*/
 	{
-		uint16_t pci_cmd_word;
 		int msix_ctrl, rid;
 
+ 		pci_enable_busmaster(dev);
 		rid = 0;
-		pci_cmd_word = pci_read_config(dev, PCIR_COMMAND, 2);
-		pci_cmd_word |= PCIM_CMD_BUSMASTEREN;
-		pci_write_config(dev, PCIR_COMMAND, pci_cmd_word, 2);
-		pci_find_cap(dev, PCIY_MSIX, &rid);
-		rid += PCIR_MSIX_CTRL;
-		msix_ctrl = pci_read_config(dev, rid, 2);
-		msix_ctrl |= PCIM_MSIXCTRL_MSIX_ENABLE;
-		pci_write_config(dev, rid, msix_ctrl, 2);
+		if (pci_find_cap(dev, PCIY_MSIX, &rid) == 0 && rid != 0) {
+			rid += PCIR_MSIX_CTRL;
+			msix_ctrl = pci_read_config(dev, rid, 2);
+			msix_ctrl |= PCIM_MSIXCTRL_MSIX_ENABLE;
+			pci_write_config(dev, rid, msix_ctrl, 2);
+		} else {
+			device_printf(dev, "PCIY_MSIX capability not found; "
+			                   "or rid %d == 0.\n", rid);
+			goto msi;
+		}
 	}
 
 	/*
