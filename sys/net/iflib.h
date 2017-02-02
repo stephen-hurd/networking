@@ -92,8 +92,8 @@ typedef struct if_rxd_info {
 #define IPI_TX_IPV6	0x4		/* ethertype IPv6 */
 
 typedef struct if_pkt_info {
-	uint32_t			ipi_len;	/* packet length */
 	bus_dma_segment_t		*ipi_segs;	/* physical addresses */
+	uint32_t			ipi_len;	/* packet length */
 	uint16_t			ipi_qsidx;	/* queue set index */
 	uint16_t			ipi_nsegs;	/* number of segments */
 	uint16_t			ipi_ndescs;	/* number of descriptors used by encap */
@@ -101,17 +101,17 @@ typedef struct if_pkt_info {
 	uint32_t			ipi_pidx;	/* start pidx for encap */
 	uint32_t			ipi_new_pidx;	/* next available pidx post-encap */
 	/* offload handling */
+	uint8_t			ipi_ehdrlen;	/* ether header length */
+	uint8_t			ipi_ip_hlen;	/* ip header length */
+	uint8_t			ipi_tcp_hlen;	/* tcp header length */
+	uint8_t			ipi_ipproto;	/* ip protocol */
 	uint64_t			ipi_csum_flags;	/* packet checksum flags */
 	uint16_t			ipi_tso_segsz;	/* tso segment size */
 	uint16_t			ipi_mflags;	/* packet mbuf flags */
 	uint16_t			ipi_vtag;	/* VLAN tag */
 	uint16_t			ipi_etype;	/* ether header type */
-	uint8_t				ipi_ehdrlen;	/* ether header length */
-	uint8_t				ipi_ip_hlen;	/* ip header length */
-	uint8_t				ipi_tcp_hlen;	/* tcp header length */
-	uint8_t				ipi_tcp_hflags;	/* tcp header flags */
-	uint8_t				ipi_ipproto;	/* ip protocol */
-	/* implied padding */
+	uint8_t			ipi_tcp_hflags;	/* tcp header flags */
+	/* 7 bytes implied padding on 64-bit */
 	uint32_t			ipi_tcp_seq;	/* tcp seqno */
 	uint32_t			ipi_tcp_sum;	/* tcp csum */
 } *if_pkt_info_t;
