@@ -910,7 +910,7 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 	struct ifnet *ifp = na->ifp;
 	struct netmap_ring *ring = kring->ring;
 	u_int nm_i;	/* index into the netmap ring */
-	u_int nic_i;	/* index into the NIC ring */
+	u_int nic_i, nic_i_start;	/* index into the NIC ring */
 	u_int i, n;
 	u_int const lim = kring->nkr_num_slots - 1;
 	u_int const head = kring->rhead;
@@ -923,7 +923,6 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 	if (head > lim)
 		return netmap_ring_reinit(kring);
 
-	rxd_info_zero(&ri);
 	ri.iri_qsidx = kring->ring_id;
 	ri.iri_ifp = ctx->ifc_ifp;
 	/* XXX check sync modes */
@@ -956,6 +955,7 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 			nm_i = netmap_idx_n2k(kring, nic_i);
 			avail = ctx->isc_rxd_available(ctx->ifc_softc, kring->ring_id, nic_i, INT_MAX);
 			for (n = 0; avail > 0; n++, avail--) {
+				rxd_info_zero(&ri);
 				error = ctx->isc_rxd_pkt_get(ctx->ifc_softc, &ri);
 				if (error)
 					ring->slot[nm_i].len = 0;
@@ -990,46 +990,51 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 	 */
 	/* XXX not sure how this will work with multiple free lists */
 	nm_i = kring->nr_hwcur;
-	if (nm_i != head) {
-		nic_i = netmap_idx_k2n(kring, nm_i);
-		for (n = 0; nm_i != head; n++) {
-			struct netmap_slot *slot = &ring->slot[nm_i];
-			uint64_t paddr;
-			caddr_t vaddr;
-			void *addr = PNMB(na, slot, &paddr);
+	if (nm_i == head)
+		return (0);
 
-			if (addr == NETMAP_BUF_BASE(na)) /* bad buf */
-				goto ring_reset;
+	nic_i_start = nic_i = netmap_idx_k2n(kring, nm_i);
+	for (i = 0; nm_i != head; i++) {
+		struct netmap_slot *slot = &ring->slot[nm_i];
+		void *addr = PNMB(na, slot, &fl->ifl_bus_addrs[i]);
 
-			vaddr = addr;
-			if (slot->flags & NS_BUF_CHANGED) {
-				/* buffer has changed, reload map */
-				netmap_reload_map(na, fl->ifl_ifdi->idi_tag, fl->ifl_sds.ifsd_map[nic_i], addr);
-				slot->flags &= ~NS_BUF_CHANGED;
-			}
-			/*
-			 * XXX we should be batching this operation - TODO
-			 */
-			ctx->isc_rxd_refill(ctx->ifc_softc, rxq->ifr_id, fl->ifl_id, nic_i, &paddr, &vaddr, 1, fl->ifl_buf_size);
-			if (fl->ifl_sds.ifsd_map)
-				bus_dmamap_sync(fl->ifl_ifdi->idi_tag, fl->ifl_sds.ifsd_map[nic_i],
-			    BUS_DMASYNC_PREREAD);
-			nm_i = nm_next(nm_i, lim);
-			nic_i = nm_next(nic_i, lim);
+		if (addr == NETMAP_BUF_BASE(na)) /* bad buf */
+			goto ring_reset;
+
+		fl->ifl_vm_addrs[i] = addr;
+		if (fl->ifl_sds.ifsd_map && (slot->flags & NS_BUF_CHANGED)) {
+			/* buffer has changed, reload map */
+			netmap_reload_map(na, fl->ifl_ifdi->idi_tag, fl->ifl_sds.ifsd_map[nic_i], addr);
 		}
-		kring->nr_hwcur = head;
+		slot->flags &= ~NS_BUF_CHANGED;
 
-		if (fl->ifl_sds.ifsd_map)
-			bus_dmamap_sync(fl->ifl_ifdi->idi_tag, fl->ifl_ifdi->idi_map,
-		    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
-		/*
-		 * IMPORTANT: we must leave one free slot in the ring,
-		 * so move nic_i back by one unit
-		 */
-		nic_i = nm_prev(nic_i, lim);
-		ctx->isc_rxd_flush(ctx->ifc_softc, rxq->ifr_id, fl->ifl_id, nic_i);
+		nm_i = nm_next(nm_i, lim);
+		nic_i = nm_next(nic_i, lim);
+		if (nm_i == head || i == IFLIB_MAX_RX_REFRESH) {
+			ctx->isc_rxd_refill(ctx->ifc_softc, rxq->ifr_id, fl->ifl_id, nic_i, fl->ifl_bus_addrs,
+					    fl->ifl_vm_addrs, i, fl->ifl_buf_size);
+			if (fl->ifl_sds.ifsd_map == NULL)
+				continue;
+			nic_i = nic_i_start;
+			for (n = 0; n < i; n++) {
+				bus_dmamap_sync(fl->ifl_ifdi->idi_tag, fl->ifl_sds.ifsd_map[nic_i],
+						BUS_DMASYNC_PREREAD);
+				nic_i = nm_next(nic_i, lim);
+			}
+			nic_i_start = nic_i;
+		}
 	}
+	kring->nr_hwcur = head;
 
+	if (fl->ifl_sds.ifsd_map)
+		bus_dmamap_sync(fl->ifl_ifdi->idi_tag, fl->ifl_ifdi->idi_map,
+				BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+	/*
+	 * IMPORTANT: we must leave one free slot in the ring,
+	 * so move nic_i back by one unit
+	 */
+	nic_i = nm_prev(nic_i, lim);
+	ctx->isc_rxd_flush(ctx->ifc_softc, rxq->ifr_id, fl->ifl_id, nic_i);
 	return 0;
 
 ring_reset:
