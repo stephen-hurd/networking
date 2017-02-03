@@ -77,14 +77,15 @@ typedef struct if_rxd_info {
 	struct ifnet *iri_ifp;		/* some drivers >1 interface per softc */
 
 	/* updated by driver */
-	uint16_t iri_flags;		/* mbuf flags for packet */
+	if_rxd_frag_t iri_frags;
 	uint32_t iri_flowid;		/* RSS hash for packet */
 	uint32_t iri_csum_flags;	/* m_pkthdr csum flags */
+
 	uint32_t iri_csum_data;		/* m_pkthdr csum data */
+	uint8_t iri_flags;		/* mbuf flags for packet */
 	uint8_t	 iri_nfrags;		/* number of fragments in packet */
 	uint8_t	 iri_rsstype;		/* RSS hash type */
 	uint8_t	 iri_pad;		/* any padding in the received data */
-	if_rxd_frag_t iri_frags;
 } *if_rxd_info_t;
 
 #define IPI_TX_INTR	0x1		/* send an interrupt when this packet is sent */
