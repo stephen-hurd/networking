@@ -96,6 +96,7 @@ typedef struct if_pkt_info {
 	uint32_t			ipi_len;	/* packet length */
 	uint16_t			ipi_qsidx;	/* queue set index */
 	uint16_t			ipi_nsegs;	/* number of segments */
+
 	uint16_t			ipi_ndescs;	/* number of descriptors used by encap */
 	uint16_t			ipi_flags;	/* iflib per-packet flags */
 	uint32_t			ipi_pidx;	/* start pidx for encap */
@@ -105,13 +106,14 @@ typedef struct if_pkt_info {
 	uint8_t			ipi_ip_hlen;	/* ip header length */
 	uint8_t			ipi_tcp_hlen;	/* tcp header length */
 	uint8_t			ipi_ipproto;	/* ip protocol */
+
 	uint64_t			ipi_csum_flags;	/* packet checksum flags */
 	uint16_t			ipi_tso_segsz;	/* tso segment size */
-	uint16_t			ipi_mflags;	/* packet mbuf flags */
 	uint16_t			ipi_vtag;	/* VLAN tag */
 	uint16_t			ipi_etype;	/* ether header type */
 	uint8_t			ipi_tcp_hflags;	/* tcp header flags */
-	/* 7 bytes implied padding on 64-bit */
+	uint8_t			ipi_mflags;	/* packet mbuf flags */
+
 	uint32_t			ipi_tcp_seq;	/* tcp seqno */
 	uint32_t			ipi_tcp_sum;	/* tcp csum */
 } *if_pkt_info_t;
