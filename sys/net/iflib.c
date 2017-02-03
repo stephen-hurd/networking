@@ -791,6 +791,7 @@ iflib_netmap_txsync(struct netmap_kring *kring, int flags)
 	if_ctx_t ctx = ifp->if_softc;
 	iflib_txq_t txq = &ctx->ifc_txqs[kring->ring_id];
 
+	pkt_info_zero(&pi);
 	pi.ipi_segs = txq->ift_segs;
 	pi.ipi_qsidx = kring->ring_id;
 	pi.ipi_ndescs = 0;
@@ -849,7 +850,8 @@ iflib_netmap_txsync(struct netmap_kring *kring, int flags)
 			/* prefetch for next round */
 			__builtin_prefetch(&ring->slot[nm_i + 1]);
 			__builtin_prefetch(&txq->ift_sds.ifsd_m[nic_i + 1]);
-			__builtin_prefetch(&txq->ift_sds.ifsd_map[nic_i + 1]);
+			if (txq->ift_sds.ifsd_map)
+				__builtin_prefetch(&txq->ift_sds.ifsd_map[nic_i + 1]);
 
 			NM_CHECK_ADDR_LEN(na, addr, len);
 
@@ -860,7 +862,8 @@ iflib_netmap_txsync(struct netmap_kring *kring, int flags)
 			slot->flags &= ~(NS_REPORT | NS_BUF_CHANGED);
 
 			/* make sure changes to the buffer are synced */
-			bus_dmamap_sync(txq->ift_ifdi->idi_tag, txq->ift_sds.ifsd_map[nic_i],
+			if (txq->ift_sds.ifsd_map)
+				bus_dmamap_sync(txq->ift_ifdi->idi_tag, txq->ift_sds.ifsd_map[nic_i],
 							BUS_DMASYNC_PREWRITE);
 
 			nm_i = nm_next(nm_i, lim);
@@ -869,7 +872,8 @@ iflib_netmap_txsync(struct netmap_kring *kring, int flags)
 		kring->nr_hwcur = head;
 
 		/* synchronize the NIC ring */
-		bus_dmamap_sync(txq->ift_desc_tag, txq->ift_ifdi->idi_map,
+		if (txq->ift_sds.ifsd_map)
+			bus_dmamap_sync(txq->ift_desc_tag, txq->ift_ifdi->idi_map,
 						BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
 		/* (re)start the tx unit up to slot nic_i (excluded) */
@@ -959,7 +963,8 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 				else
 					ring->slot[nm_i].len = ri.iri_len - crclen;
 				ring->slot[nm_i].flags = slot_flags;
-				bus_dmamap_sync(fl->ifl_ifdi->idi_tag,
+				if (fl->ifl_sds.ifsd_map)
+					bus_dmamap_sync(fl->ifl_ifdi->idi_tag,
 								fl->ifl_sds.ifsd_map[nic_i], BUS_DMASYNC_POSTREAD);
 				nm_i = nm_next(nm_i, lim);
 				nic_i = nm_next(nic_i, lim);
@@ -1007,14 +1012,16 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 			 * XXX we should be batching this operation - TODO
 			 */
 			ctx->isc_rxd_refill(ctx->ifc_softc, rxq->ifr_id, fl->ifl_id, nic_i, &paddr, &vaddr, 1, fl->ifl_buf_size);
-			bus_dmamap_sync(fl->ifl_ifdi->idi_tag, fl->ifl_sds.ifsd_map[nic_i],
+			if (fl->ifl_sds.ifsd_map)
+				bus_dmamap_sync(fl->ifl_ifdi->idi_tag, fl->ifl_sds.ifsd_map[nic_i],
 			    BUS_DMASYNC_PREREAD);
 			nm_i = nm_next(nm_i, lim);
 			nic_i = nm_next(nic_i, lim);
 		}
 		kring->nr_hwcur = head;
 
-		bus_dmamap_sync(fl->ifl_ifdi->idi_tag, fl->ifl_ifdi->idi_map,
+		if (fl->ifl_sds.ifsd_map)
+			bus_dmamap_sync(fl->ifl_ifdi->idi_tag, fl->ifl_ifdi->idi_map,
 		    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 		/*
 		 * IMPORTANT: we must leave one free slot in the ring,
@@ -1089,14 +1096,17 @@ iflib_netmap_rxq_init(if_ctx_t ctx, iflib_rxq_t rxq)
 		return;
 	map = rxq->ifr_fl[0].ifl_sds.ifsd_map;
 	nrxd = ctx->ifc_softc_ctx.isc_nrxd[0];
-	for (int i = 0; i < nrxd; i++, map++) {
+	for (int i = 0; i < nrxd; i++) {
 			int sj = netmap_idx_n2k(&na->rx_rings[rxq->ifr_id], i);
 			uint64_t paddr;
 			void *addr;
 			caddr_t vaddr;
 
 			vaddr = addr = PNMB(na, slot + sj, &paddr);
-			netmap_load_map(na, rxq->ifr_fl[0].ifl_ifdi->idi_tag, *map, addr);
+			if (map) {
+				netmap_load_map(na, rxq->ifr_fl[0].ifl_ifdi->idi_tag, *map, addr);
+				map++;
+			}
 			/* Update descriptor and the cached value */
 			ctx->isc_rxd_refill(ctx->ifc_softc, rxq->ifr_id, 0 /* fl_id */, i, &paddr, &vaddr, 1, rxq->ifr_fl[0].ifl_buf_size);
 	}
