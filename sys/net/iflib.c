@@ -438,6 +438,38 @@ struct iflib_rxq {
 #endif
 }  __aligned(CACHE_LINE_SIZE);
 
+/* multiple of word size */
+#ifdef __LP64__
+#define PKT_INFO_SIZE	7
+#define PKT_TYPE uint64_t
+#else
+#define PKT_INFO_SIZE	13
+#define PKT_TYPE uint32_t
+#endif
+#define PKT_LOOP_BOUND  ((PKT_INFO_SIZE/3)*3)
+
+typedef struct if_pkt_info_pad {
+	PKT_TYPE pkt_val[PKT_INFO_SIZE];
+} *if_pkt_info_pad_t;
+
+CTASSERT(sizeof(struct if_pkt_info_pad) == sizeof(struct if_pkt_info));
+
+
+static inline void
+pkt_info_zero(if_pkt_info_t pi)
+{
+	if_pkt_info_pad_t pi_pad;
+	int i;
+
+	pi_pad = (if_pkt_info_pad_t)pi;
+	for (i = 0; i < PKT_LOOP_BOUND; i += 3) {
+		pi_pad->pkt_val[i] = 0;
+		pi_pad->pkt_val[i+1] = 0;
+		pi_pad->pkt_val[i+2] = 0;
+	}
+	pi_pad->pkt_val[PKT_INFO_SIZE-1] = 0;
+}
+
 /*
  * Only allow a single packet to take up most 1/nth of the tx ring
  */
@@ -771,7 +803,8 @@ iflib_netmap_txsync(struct netmap_kring *kring, int flags)
 
 		__builtin_prefetch(&ring->slot[nm_i]);
 		__builtin_prefetch(&txq->ift_sds.ifsd_m[nic_i]);
-		__builtin_prefetch(&txq->ift_sds.ifsd_map[nic_i]);
+		if (txq->ift_sds.ifsd_map)
+			__builtin_prefetch(&txq->ift_sds.ifsd_map[nic_i]);
 
 		for (n = 0; nm_i != head; n++) {
 			struct netmap_slot *slot = &ring->slot[nm_i];
@@ -2724,7 +2757,8 @@ iflib_encap(iflib_txq_t txq, struct mbuf **m_headp)
 		max_segs = scctx->isc_tx_nsegments;
 	}
 	m_head = *m_headp;
-	bzero(&pi, sizeof(pi));
+
+	pkt_info_zero(&pi);
 	pi.ipi_len = m_head->m_pkthdr.len;
 	pi.ipi_mflags = (m_head->m_flags & (M_VLANTAG|M_BCAST|M_MCAST));
 	pi.ipi_csum_flags = m_head->m_pkthdr.csum_flags;
