@@ -441,18 +441,25 @@ struct iflib_rxq {
 /* multiple of word size */
 #ifdef __LP64__
 #define PKT_INFO_SIZE	7
+#define RXD_INFO_SIZE 6
 #define PKT_TYPE uint64_t
 #else
 #define PKT_INFO_SIZE	13
+#define RXD_INFO_SIZE 10
 #define PKT_TYPE uint32_t
 #endif
 #define PKT_LOOP_BOUND  ((PKT_INFO_SIZE/3)*3)
+#define RXD_LOOP_BOUND  ((RXD_INFO_SIZE/3)*3)
 
 typedef struct if_pkt_info_pad {
 	PKT_TYPE pkt_val[PKT_INFO_SIZE];
 } *if_pkt_info_pad_t;
+typedef struct if_rxd_info_pad {
+	PKT_TYPE rxd_val[RXD_INFO_SIZE];
+} *if_pkt_info_pad_t;
 
 CTASSERT(sizeof(struct if_pkt_info_pad) == sizeof(struct if_pkt_info));
+CTASSERT(sizeof(struct if_rxd_info_pad) == sizeof(struct if_rxd_info));
 
 
 static inline void
@@ -468,6 +475,23 @@ pkt_info_zero(if_pkt_info_t pi)
 		pi_pad->pkt_val[i+2] = 0;
 	}
 	pi_pad->pkt_val[PKT_INFO_SIZE-1] = 0;
+}
+
+static inline void
+rxd_info_zero(if_rxd_info_t ri)
+{
+	if_rxd_info_pad_t ri_pad;
+	int i;
+
+	ri_pad = (if_rxd_info_pad_t)ri;
+	for (i = 0; i < RXD_LOOP_BOUND; i += 3) {
+		ri_pad->rxd_val[i] = 0;
+		ri_pad->rxd_val[i+1] = 0;
+		ri_pad->rxd_val[i+2] = 0;
+	}
+#ifndef __LP64__
+	ri_pad->rxd_val[RXD_INFO_SIZE-1] = 0;
+#endif
 }
 
 /*
@@ -896,7 +920,7 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 	if (head > lim)
 		return netmap_ring_reinit(kring);
 
-	bzero(&ri, sizeof(ri));
+	rxd_info_zero(&ri);
 	ri.iri_qsidx = kring->ring_id;
 	ri.iri_ifp = ctx->ifc_ifp;
 	/* XXX check sync modes */
@@ -2264,7 +2288,7 @@ iflib_rxeof(iflib_rxq_t rxq, int budget)
 		/*
 		 * Reset client set fields to their default values
 		 */
-		bzero(&ri, sizeof(ri));
+		rxd_info_zero(&ri);
 		ri.iri_qsidx = rxq->ifr_id;
 		ri.iri_cidx = *cidxp;
 		ri.iri_ifp = ctx->ifc_ifp;
