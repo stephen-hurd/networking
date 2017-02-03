@@ -441,22 +441,22 @@ struct iflib_rxq {
 /* multiple of word size */
 #ifdef __LP64__
 #define PKT_INFO_SIZE	7
-#define RXD_INFO_SIZE 6
+#define RXD_INFO_SIZE	5
 #define PKT_TYPE uint64_t
 #else
 #define PKT_INFO_SIZE	13
-#define RXD_INFO_SIZE 10
+#define RXD_INFO_SIZE	8
 #define PKT_TYPE uint32_t
 #endif
 #define PKT_LOOP_BOUND  ((PKT_INFO_SIZE/3)*3)
-#define RXD_LOOP_BOUND  ((RXD_INFO_SIZE/3)*3)
+#define RXD_LOOP_BOUND  ((RXD_INFO_SIZE/4)*4)
 
 typedef struct if_pkt_info_pad {
 	PKT_TYPE pkt_val[PKT_INFO_SIZE];
 } *if_pkt_info_pad_t;
 typedef struct if_rxd_info_pad {
 	PKT_TYPE rxd_val[RXD_INFO_SIZE];
-} *if_pkt_info_pad_t;
+} *if_rxd_info_pad_t;
 
 CTASSERT(sizeof(struct if_pkt_info_pad) == sizeof(struct if_pkt_info));
 CTASSERT(sizeof(struct if_rxd_info_pad) == sizeof(struct if_rxd_info));
@@ -484,12 +484,13 @@ rxd_info_zero(if_rxd_info_t ri)
 	int i;
 
 	ri_pad = (if_rxd_info_pad_t)ri;
-	for (i = 0; i < RXD_LOOP_BOUND; i += 3) {
+	for (i = 0; i < RXD_LOOP_BOUND; i += 4) {
 		ri_pad->rxd_val[i] = 0;
 		ri_pad->rxd_val[i+1] = 0;
 		ri_pad->rxd_val[i+2] = 0;
+		ri_pad->rxd_val[i+3] = 0;
 	}
-#ifndef __LP64__
+#ifdef __LP64__
 	ri_pad->rxd_val[RXD_INFO_SIZE-1] = 0;
 #endif
 }
@@ -850,22 +851,20 @@ iflib_netmap_txsync(struct netmap_kring *kring, int flags)
 			/* prefetch for next round */
 			__builtin_prefetch(&ring->slot[nm_i + 1]);
 			__builtin_prefetch(&txq->ift_sds.ifsd_m[nic_i + 1]);
-			if (txq->ift_sds.ifsd_map)
+			if (txq->ift_sds.ifsd_map) {
 				__builtin_prefetch(&txq->ift_sds.ifsd_map[nic_i + 1]);
 
-			NM_CHECK_ADDR_LEN(na, addr, len);
+				NM_CHECK_ADDR_LEN(na, addr, len);
 
-			if (slot->flags & NS_BUF_CHANGED) {
-				/* buffer has changed, reload map */
-				netmap_reload_map(na, txq->ift_desc_tag, txq->ift_sds.ifsd_map[nic_i], addr);
+				if (slot->flags & NS_BUF_CHANGED) {
+					/* buffer has changed, reload map */
+					netmap_reload_map(na, txq->ift_desc_tag, txq->ift_sds.ifsd_map[nic_i], addr);
+				}
+				/* make sure changes to the buffer are synced */
+				bus_dmamap_sync(txq->ift_ifdi->idi_tag, txq->ift_sds.ifsd_map[nic_i],
+						BUS_DMASYNC_PREWRITE);
 			}
 			slot->flags &= ~(NS_REPORT | NS_BUF_CHANGED);
-
-			/* make sure changes to the buffer are synced */
-			if (txq->ift_sds.ifsd_map)
-				bus_dmamap_sync(txq->ift_ifdi->idi_tag, txq->ift_sds.ifsd_map[nic_i],
-							BUS_DMASYNC_PREWRITE);
-
 			nm_i = nm_next(nm_i, lim);
 			nic_i = nm_next(nic_i, lim);
 		}
