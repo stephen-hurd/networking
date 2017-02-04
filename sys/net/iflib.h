@@ -88,6 +88,17 @@ typedef struct if_rxd_info {
 	uint8_t	 iri_pad;		/* any padding in the received data */
 } *if_rxd_info_t;
 
+typedef struct if_rxd_update {
+	uint64_t	*iru_paddrs;
+	uint32_t	*iru_idxs;
+	caddr_t		*iru_vaddrs;
+	uint32_t	iru_pidx;
+	uint16_t	iru_qsidx;
+	uint16_t	iru_count;
+	uint16_t	iru_buf_size;
+	uint8_t		iru_flidx;
+} *if_rxd_update_t;
+
 #define IPI_TX_INTR	0x1		/* send an interrupt when this packet is sent */
 #define IPI_TX_IPV4	0x2		/* ethertype IPv4 */
 #define IPI_TX_IPV6	0x4		/* ethertype IPv6 */
@@ -165,8 +176,7 @@ typedef struct if_txrx {
 	int (*ift_rxd_available) (void *, uint16_t qsidx, uint32_t pidx,
 	    int budget);
 	int (*ift_rxd_pkt_get) (void *, if_rxd_info_t ri);
-	void (*ift_rxd_refill) (void * , uint16_t qsidx, uint8_t flidx, uint32_t pidx,
-							uint64_t *paddrs, caddr_t *vaddrs, uint16_t count, uint16_t buf_size);
+	void (*ift_rxd_refill) (void * , if_rxd_update_t iru);
 	void (*ift_rxd_flush) (void *, uint16_t qsidx, uint8_t flidx, uint32_t pidx);
 	int (*ift_legacy_intr) (void *);
 } *if_txrx_t;

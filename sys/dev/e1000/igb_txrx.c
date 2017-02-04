@@ -45,8 +45,8 @@ static int igb_isc_txd_encap(void *arg, if_pkt_info_t pi);
 static void igb_isc_txd_flush(void *arg, uint16_t txqid, uint32_t pidx);
 static int igb_isc_txd_credits_update(void *arg, uint16_t txqid, uint32_t cidx, bool clear);
 
-static void igb_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
-			       uint32_t pidx, uint64_t *paddrs, caddr_t *vaddrs __unused, uint16_t count, uint16_t buf_len __unused);
+static void igb_isc_rxd_refill(void *arg, if_rxd_update_t iru);
+
 static void igb_isc_rxd_flush(void *arg, uint16_t rxqid, uint8_t flid __unused, uint32_t pidx);
 static int igb_isc_rxd_available(void *arg, uint16_t rxqid, uint32_t idx,
 				 int budget);
@@ -385,17 +385,22 @@ igb_isc_txd_credits_update(void *arg, uint16_t txqid, uint32_t cidx_init, bool c
 }
 
 static void
-igb_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
-		   uint32_t pidx, uint64_t *paddrs, caddr_t *vaddrs __unused,
-		   uint16_t count, uint16_t buf_len __unused)
+igb_isc_rxd_refill(void *arg, if_rxd_update_t iru)
 {
 	struct adapter *sc           = arg;
 	if_softc_ctx_t scctx         = sc->shared; 
+	uint16_t rxqid = iru->iru_qsidx;
 	struct em_rx_queue *que     = &sc->rx_queues[rxqid];
 	union e1000_adv_rx_desc *rxd;
 	struct rx_ring *rxr          = &que->rxr;
-	int			     i;
-	uint32_t next_pidx;
+	uint64_t *paddrs;
+	uint32_t next_pidx, pidx;
+	uint16_t count;
+	int i;
+
+	paddrs = iru->iru_paddrs;
+	pidx = iru->iru_pidx;
+	count = iru->iru_count;
 
 	for (i = 0, next_pidx = pidx; i < count; i++) {
 		rxd = (union e1000_adv_rx_desc *)&rxr->rx_base[next_pidx];

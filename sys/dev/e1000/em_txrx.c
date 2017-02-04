@@ -46,15 +46,13 @@ static int em_transmit_checksum_setup(struct adapter *adapter, if_pkt_info_t pi,
 static int em_isc_txd_encap(void *arg, if_pkt_info_t pi);
 static void em_isc_txd_flush(void *arg, uint16_t txqid, uint32_t pidx);
 static int em_isc_txd_credits_update(void *arg, uint16_t txqid, uint32_t cidx_init, bool clear);
-static void em_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
-			      uint32_t pidx, uint64_t *paddrs, caddr_t *vaddrs __unused, uint16_t count, uint16_t buflen __unused);
+static void em_isc_rxd_refill(void *arg, if_rxd_update_t iru);
 static void em_isc_rxd_flush(void *arg, uint16_t rxqid, uint8_t flid __unused, uint32_t pidx);
 static int em_isc_rxd_available(void *arg, uint16_t rxqid, uint32_t idx,
 				int budget);
 static int em_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri);
 
-static void lem_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
-			      uint32_t pidx, uint64_t *paddrs, caddr_t *vaddrs __unused, uint16_t count, uint16_t buflen __unused);
+static void lem_isc_rxd_refill(void *arg, if_rxd_update_t iru);
 
 static int lem_isc_rxd_available(void *arg, uint16_t rxqid, uint32_t idx,
 				int budget);
@@ -464,16 +462,22 @@ em_isc_txd_credits_update(void *arg, uint16_t txqid, uint32_t cidx_init, bool cl
 }
 
 static void
-lem_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
-		  uint32_t pidx, uint64_t *paddrs, caddr_t *vaddrs __unused, uint16_t count, uint16_t buflen __unused)
+lem_isc_rxd_refill(void *arg, if_rxd_update_t iru)
 {
 	struct adapter *sc = arg;
 	if_softc_ctx_t scctx = sc->shared;
+	uint16_t rxqid = iru->iru_qsidx;
 	struct em_rx_queue *que = &sc->rx_queues[rxqid];
 	struct rx_ring *rxr = &que->rxr;
 	struct e1000_rx_desc *rxd;
+	uint64_t *paddrs;
+	uint32_t next_pidx, pidx;
+	uint16_t count;
 	int i;
-	uint32_t next_pidx;
+
+	paddrs = iru->iru_paddrs;
+	pidx = iru->iru_pidx;
+	count = iru->iru_count;
 
 	for (i = 0, next_pidx = pidx; i < count; i++) {
 		rxd = (struct e1000_rx_desc *)&rxr->rx_base[next_pidx];
@@ -487,16 +491,22 @@ lem_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
 }
 
 static void
-em_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
-		  uint32_t pidx, uint64_t *paddrs, caddr_t *vaddrs __unused, uint16_t count, uint16_t buflen __unused)
+em_isc_rxd_refill(void *arg, if_rxd_update_t iru)
 {
 	struct adapter *sc = arg;
 	if_softc_ctx_t scctx = sc->shared;
+	uint16_t rxqid = iru->iru_qsidx;
 	struct em_rx_queue *que = &sc->rx_queues[rxqid];
 	struct rx_ring *rxr = &que->rxr;
 	union e1000_rx_desc_extended *rxd;
+	uint64_t *paddrs;
+	uint32_t next_pidx, pidx;
+	uint16_t count;
 	int i;
-	uint32_t next_pidx;
+
+	paddrs = iru->iru_paddrs;
+	pidx = iru->iru_pidx;
+	count = iru->iru_count;
 
 	for (i = 0, next_pidx = pidx; i < count; i++) {
 		rxd = &rxr->rx_base[next_pidx];
