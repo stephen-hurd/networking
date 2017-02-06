@@ -255,6 +255,7 @@ iflib_get_sctx(if_ctx_t ctx)
 }
 
 #define CACHE_PTR_INCREMENT (CACHE_LINE_SIZE/sizeof(void*))
+#define CACHE_PTR_NEXT(ptr) ((void *)(((vm_paddr_t)(ptr)+CACHE_LINE_SIZE-1) & (CACHE_LINE_SIZE-1)))
 
 #define LINK_ACTIVE(ctx) ((ctx)->ifc_link_state == LINK_STATE_UP)
 #define CTX_IS_VF(ctx) ((ctx)->ifc_sctx->isc_flags & IFLIB_IS_VF)
@@ -314,6 +315,7 @@ struct iflib_txq {
 	uint8_t		ift_npending;
 	uint8_t		ift_br_offset;
 	/* implicit pad */
+	uint8_t		ift_txd_size[8];
 	uint64_t	ift_processed;
 	uint64_t	ift_cleaned;
 #if MEMORY_LOGGING
@@ -364,6 +366,7 @@ struct iflib_fl {
 	uint16_t	ifl_pidx;
 	uint16_t	ifl_credits;
 	uint8_t		ifl_gen;
+	uint8_t		ifl_rxd_size;
 #if MEMORY_LOGGING
 	uint64_t	ifl_m_enqueued;
 	uint64_t	ifl_m_dequeued;
@@ -2138,15 +2141,37 @@ iflib_stop(if_ctx_t ctx)
 	}
 }
 
+static inline caddr_t
+calc_next_rxd(iflib_fl_t fl, int cidx)
+{
+	uint16_t size;
+	int nrxd;
+	caddr_t start, end, cur, next;
+
+	nrxd = fl->ifl_size;
+	size = fl->ifl_rxd_size;
+	start = fl->ifl_ifdi->idi_vaddr;
+
+	if (__predict_false(size == 0))
+		return (start);
+	cur = start + size*cidx;
+	end = start + size*nrxd;
+	next = CACHE_PTR_NEXT(cur);
+	return (next < end ? next : start);
+}
+
 static inline void
 prefetch_pkts(iflib_fl_t fl, int cidx)
 {
 	int nextptr;
 	int nrxd = fl->ifl_size;
+	caddr_t next_rxd;
 
 	nextptr = (cidx + CACHE_PTR_INCREMENT) & (nrxd-1);
 	prefetch(&fl->ifl_sds.ifsd_m[nextptr]);
 	prefetch(&fl->ifl_sds.ifsd_cl[nextptr]);
+	next_rxd = calc_next_rxd(fl, cidx);
+	prefetch(next_rxd);
 	prefetch(fl->ifl_sds.ifsd_m[(cidx + 1) & (nrxd-1)]);
 	prefetch(fl->ifl_sds.ifsd_m[(cidx + 2) & (nrxd-1)]);
 	prefetch(fl->ifl_sds.ifsd_m[(cidx + 3) & (nrxd-1)]);
@@ -2784,6 +2809,25 @@ err:
 	return (EFBIG);
 }
 
+static inline caddr_t
+calc_next_txd(iflib_txq_t txq, int cidx, uint8_t qid)
+{
+	uint16_t size;
+	int ntxd;
+	caddr_t start, end, cur, next;
+
+	ntxd = txq->ift_size;
+	size = txq->ift_txd_size[qid];
+	start = txq->ift_ifdi[qid].idi_vaddr;
+
+	if (__predict_false(size == 0))
+		return (start);
+	cur = start + size*cidx;
+	end = start + size*ntxd;
+	next = CACHE_PTR_NEXT(cur);
+	return (next < end ? next : start);
+}
+
 static int
 iflib_encap(iflib_txq_t txq, struct mbuf **m_headp)
 {
@@ -2792,6 +2836,7 @@ iflib_encap(iflib_txq_t txq, struct mbuf **m_headp)
 	if_softc_ctx_t		scctx;
 	bus_dma_segment_t	*segs;
 	struct mbuf		*m_head;
+	void			*next_txd;
 	bus_dmamap_t		map;
 	struct if_pkt_info	pi;
 	int remap = 0;
@@ -2813,6 +2858,10 @@ iflib_encap(iflib_txq_t txq, struct mbuf **m_headp)
 	cidx = txq->ift_cidx;
 	pidx = txq->ift_pidx;
 	next = (cidx + CACHE_PTR_INCREMENT) & (ntxd-1);
+	if (!(ctx->ifc_flags & IFLIB_HAS_TXCQ)) {
+		next_txd = calc_next_txd(txq, cidx, 0);
+		prefetch(next_txd);
+	}
 
 	/* prefetch the next cache line of mbuf pointers and flags */
 	prefetch(&txq->ift_sds.ifsd_m[next]);
@@ -2822,7 +2871,6 @@ iflib_encap(iflib_txq_t txq, struct mbuf **m_headp)
 		next = (cidx + CACHE_LINE_SIZE) & (ntxd-1);
 		prefetch(&txq->ift_sds.ifsd_flags[next]);
 	}
-
 
 	if (m_head->m_pkthdr.csum_flags & CSUM_TSO) {
 		desc_tag = txq->ift_tso_desc_tag;
@@ -2954,10 +3002,9 @@ defrag_failed:
 #define NRXQSETS(ctx) ((ctx)->ifc_softc_ctx.isc_nrxqsets)
 #define QIDX(ctx, m) ((((m)->m_pkthdr.flowid & ctx->ifc_softc_ctx.isc_rss_table_mask) % NTXQSETS(ctx)) + FIRST_QSET(ctx))
 #define DESC_RECLAIMABLE(q) ((int)((q)->ift_processed - (q)->ift_cleaned - (q)->ift_ctx->ifc_softc_ctx.isc_tx_nsegments))
+/* XXX we should be setting this to something other than zero */
 #define RECLAIM_THRESH(ctx) ((ctx)->ifc_sctx->isc_tx_reclaim_thresh)
 #define MAX_TX_DESC(ctx) ((ctx)->ifc_softc_ctx.isc_tx_tso_segments_max)
-
-
 
 /* if there are more than TXQ_MIN_OCCUPANCY packets pending we consider deferring
  * doorbell writes
@@ -4346,6 +4393,7 @@ iflib_queues_alloc(if_ctx_t ctx)
 				err = ENOMEM;
 				goto err_tx_desc;
 			}
+			txq->ift_txd_size[j] = scctx->isc_txd_size[j];
 			bzero((void *)ifdip->idi_vaddr, txqsizes[j]);
 		}
 		txq->ift_ctx = ctx;
@@ -4423,10 +4471,10 @@ iflib_queues_alloc(if_ctx_t ctx)
 		}
 		rxq->ifr_fl = fl;
 		for (j = 0; j < nfree_lists; j++) {
-			rxq->ifr_fl[j].ifl_rxq = rxq;
-			rxq->ifr_fl[j].ifl_id = j;
-			rxq->ifr_fl[j].ifl_ifdi =
-			    &rxq->ifr_ifdi[j + rxq->ifr_fl_offset];
+			fl[j].ifl_rxq = rxq;
+			fl[j].ifl_id = j;
+			fl[j].ifl_ifdi = &rxq->ifr_ifdi[j + rxq->ifr_fl_offset];
+			fl[j].ifl_rxd_size = scctx->isc_rxd_size[j];
 		}
         /* Allocate receive buffers for the ring*/
 		if (iflib_rxsd_alloc(rxq)) {
