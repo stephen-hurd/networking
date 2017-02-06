@@ -3115,10 +3115,22 @@ iflib_completed_tx_reclaim(iflib_txq_t txq, int thresh)
 }
 
 static struct mbuf **
-_ring_peek_one(struct ifmp_ring *r, int cidx, int offset)
+_ring_peek_one(struct ifmp_ring *r, int cidx, int offset, int remaining)
 {
+	int next, size;
+	struct mbuf **items;
 
-	return (__DEVOLATILE(struct mbuf **, &r->items[(cidx + offset) & (r->size-1)]));
+	size = r->size;
+	next = (cidx + CACHE_PTR_INCREMENT) & (size-1);
+	items = __DEVOLATILE(struct mbuf **, &r->items[0]);
+	prefetch(&items[next]);
+	prefetch(items[(cidx + offset) & (size-1)]);
+	if (remaining > 1) {
+		prefetch(items[(cidx + offset + 1) & (size-1)]);
+		prefetch(items[(cidx + offset + 2) & (size-1)]);
+		prefetch(items[(cidx + offset + 3) & (size-1)]);
+	}
+	return (__DEVOLATILE(struct mbuf **, &r->items[(cidx + offset) & (size-1)]));
 }
 
 static void
@@ -3181,7 +3193,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 #endif
 
 	for (desc_used = i = 0; i < count && TXQ_AVAIL(txq) > MAX_TX_DESC(ctx) + 2; i++) {
-		mp = _ring_peek_one(r, cidx, i);
+		mp = _ring_peek_one(r, cidx, i, count - i);
 		MPASS(mp != NULL && *mp != NULL);
 		in_use_prev = txq->ift_in_use;
 		if ((err = iflib_encap(txq, mp)) == ENOBUFS) {
@@ -3255,7 +3267,7 @@ iflib_txq_drain_free(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 
 	avail = IDXDIFF(pidx, cidx, r->size);
 	for (i = 0; i < avail; i++) {
-		mp = _ring_peek_one(r, cidx, i);
+		mp = _ring_peek_one(r, cidx, i, avail - i);
 		m_freem(*mp);
 	}
 	MPASS(ifmp_ring_is_stalled(r) == 0);
