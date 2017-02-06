@@ -778,6 +778,8 @@ em_if_attach_pre(if_ctx_t ctx)
 
 		scctx->isc_txqsizes[0] = roundup2(scctx->isc_ntxd[0] * sizeof(union e1000_adv_tx_desc), EM_DBA_ALIGN);
 		scctx->isc_rxqsizes[0] = roundup2(scctx->isc_nrxd[0] * sizeof(union e1000_adv_rx_desc), EM_DBA_ALIGN);
+		scctx->isc_txd_size[0] = sizeof(union e1000_adv_tx_desc);
+		scctx->isc_rxd_size[0] = sizeof(union e1000_adv_rx_desc);
 		scctx->isc_txrx = &igb_txrx;
 		scctx->isc_capenable = IGB_CAPS;
 		scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_TSO | CSUM_IP6_TCP \
@@ -797,12 +799,16 @@ em_if_attach_pre(if_ctx_t ctx)
 	} else if (adapter->hw.mac.type >= em_mac_min) {
 		scctx->isc_txqsizes[0] = roundup2(scctx->isc_ntxd[0]* sizeof(struct e1000_tx_desc), EM_DBA_ALIGN);
 		scctx->isc_rxqsizes[0] = roundup2(scctx->isc_nrxd[0] * sizeof(union e1000_rx_desc_extended), EM_DBA_ALIGN);
+		scctx->isc_txd_size[0] = sizeof(struct e1000_tx_desc);
+		scctx->isc_rxd_size[0] = sizeof(union e1000_rx_desc_extended);
 		scctx->isc_txrx = &em_txrx;
 		scctx->isc_capenable = EM_CAPS;
 		scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_IP_TSO;
 	} else {
 		scctx->isc_txqsizes[0] = roundup2((scctx->isc_ntxd[0] + 1) * sizeof(struct e1000_tx_desc), EM_DBA_ALIGN);
 		scctx->isc_rxqsizes[0] = roundup2((scctx->isc_nrxd[0] + 1) * sizeof(struct e1000_rx_desc), EM_DBA_ALIGN);
+		scctx->isc_txd_size[0] = sizeof(struct e1000_tx_desc);
+		scctx->isc_rxd_size[0] = sizeof(struct e1000_rx_desc);
 		scctx->isc_tx_csum_flags = CSUM_TCP | CSUM_UDP | CSUM_IP_TSO;
 		scctx->isc_txrx = &lem_txrx;
 		scctx->isc_capenable = EM_CAPS;

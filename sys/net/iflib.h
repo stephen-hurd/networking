@@ -192,6 +192,10 @@ typedef struct if_softc_ctx {
 
 	uint32_t isc_txqsizes[8];
 	uint32_t isc_rxqsizes[8];
+	/* is there such thing as a descriptor that is more than 248 bytes ? */
+	uint8_t isc_txd_size[8];
+	uint8_t isc_rxd_size[8];
+
 	int isc_max_txqsets;
 	int isc_max_rxqsets;
 	int isc_tx_tso_segments_max;
@@ -216,21 +220,13 @@ typedef struct if_softc_ctx {
 struct if_shared_ctx {
 	int isc_magic;
 	driver_t *isc_driver;
-	int isc_nfl;
-	int isc_flags;
 	bus_size_t isc_q_align;
 	bus_size_t isc_tx_maxsize;
 	bus_size_t isc_tx_maxsegsize;
 	bus_size_t isc_rx_maxsize;
 	bus_size_t isc_rx_maxsegsize;
 	int isc_rx_nsegments;
-	int isc_rx_process_limit;
-	int isc_ntxqs;			/* # of tx queues per tx qset - usually 1 */
-	int isc_nrxqs;			/* # of rx queues per rx qset - intel 1, chelsio 2, broadcom 3 */
 	int isc_admin_intrcnt;		/* # of admin/link interrupts */
-
-
-	int isc_tx_reclaim_thresh;
 
 	/* fields necessary for probe */
 	pci_vendor_info_t *isc_vendor_info;
@@ -244,6 +240,14 @@ struct if_shared_ctx {
 	int isc_ntxd_min[8];
 	int isc_ntxd_default[8];
 	int isc_ntxd_max[8];
+
+	/* actively used during operation */
+	int isc_nfl __aligned(CACHE_LINE_SIZE);
+	int isc_ntxqs;			/* # of tx queues per tx qset - usually 1 */
+	int isc_nrxqs;			/* # of rx queues per rx qset - intel 1, chelsio 2, broadcom 3 */
+	int isc_rx_process_limit;
+	int isc_tx_reclaim_thresh;
+	int isc_flags;
 };
 
 typedef struct iflib_dma_info {
@@ -310,9 +314,6 @@ if_softc_ctx_t iflib_get_softc_ctx(if_ctx_t ctx);
 if_shared_ctx_t iflib_get_sctx(if_ctx_t ctx);
 
 void iflib_set_mac(if_ctx_t ctx, uint8_t mac[ETHER_ADDR_LEN]);
-
-
-
 
 /*
  * If the driver can plug cleanly in to newbus use these
