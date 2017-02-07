@@ -919,7 +919,6 @@ static int
 iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 {
 	struct netmap_adapter *na = kring->na;
-	struct ifnet *ifp = na->ifp;
 	struct netmap_ring *ring = kring->ring;
 	uint32_t nm_i;	/* index into the netmap ring */
 	uint32_t nic_i, nic_i_start;	/* index into the NIC ring */
@@ -929,7 +928,8 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 	int force_update = (flags & NAF_FORCE_READ) || kring->nr_kflags & NKR_PENDINTR;
 	struct if_rxd_info ri;
 	struct if_rxd_update iru;
-	/* device-specific */
+
+	struct ifnet *ifp = na->ifp;
 	if_ctx_t ctx = ifp->if_softc;
 	iflib_rxq_t rxq = &ctx->ifc_rxqs[kring->ring_id];
 	iflib_fl_t fl = rxq->ifr_fl;
@@ -1061,6 +1061,22 @@ ring_reset:
 	return netmap_ring_reinit(kring);
 }
 
+static void
+iflib_netmap_intr(struct netmap_adapter *na, int onoff)
+{
+	struct ifnet *ifp = na->ifp;
+	if_ctx_t ctx = ifp->if_softc;
+
+	CTX_LOCK(ctx);
+	if (onoff) {
+		IFDI_INTR_ENABLE(ctx);
+	} else {
+		IFDI_INTR_DISABLE(ctx);
+	}
+	CTX_UNLOCK(ctx);
+}
+
+
 static int
 iflib_netmap_attach(if_ctx_t ctx)
 {
@@ -1079,6 +1095,7 @@ iflib_netmap_attach(if_ctx_t ctx)
 	na.nm_txsync = iflib_netmap_txsync;
 	na.nm_rxsync = iflib_netmap_rxsync;
 	na.nm_register = iflib_netmap_register;
+	na.nm_intr = iflib_netmap_intr;
 	na.num_tx_rings = ctx->ifc_softc_ctx.isc_ntxqsets;
 	na.num_rx_rings = ctx->ifc_softc_ctx.isc_nrxqsets;
 	return (netmap_attach(&na));
