@@ -287,6 +287,8 @@ typedef struct iflib_sw_tx_desc_array {
 #define IFLIB_QUEUE_IDLE		0
 #define IFLIB_QUEUE_HUNG		1
 #define IFLIB_QUEUE_WORKING		2
+/* maximum number of txqs that can share an rx interrupt */
+#define IFLIB_MAX_TX_SHARED_INTR	4
 
 /* this should really scale with ring size - this is a fairly arbitrary value */
 #define TX_BATCH_SIZE			16
@@ -431,10 +433,13 @@ struct iflib_rxq {
 	uint16_t	ifr_id;
 	uint8_t		ifr_lro_enabled;
 	uint8_t		ifr_nfl;
+	uint8_t		ifr_ntxqirq;
+	uint8_t		ifr_txqid[IFLIB_MAX_TX_SHARED_INTR];
 	struct lro_ctrl			ifr_lc;
 	struct grouptask        ifr_task;
 	struct iflib_filter_info ifr_filter_info;
 	iflib_dma_info_t		ifr_ifdi;
+
 	/* dynamically allocate if any drivers need a value substantially larger than this */
 	struct if_rxd_frag	ifr_frags[IFLIB_MAX_RX_SEGS] __aligned(CACHE_LINE_SIZE);
 #ifdef IFLIB_DIAGNOSTICS
@@ -845,7 +850,8 @@ iflib_netmap_txsync(struct netmap_kring *kring, int flags)
 
 			/* device-specific */
 			pi.ipi_len = len;
-			pi.ipi_segs[0] = paddr;
+			pi.ipi_segs[0].ds_addr = paddr;
+			pi.ipi_segs[0].ds_len = len;
 			pi.ipi_nsegs = 1;
 			pi.ipi_ndescs = 0;
 			pi.ipi_pidx = nic_i;
@@ -964,14 +970,11 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 			for (n = 0; avail > 0; n++, avail--) {
 				rxd_info_zero(&ri);
 				error = ctx->isc_rxd_pkt_get(ctx->ifc_softc, &ri);
-				if (error)
-					ring->slot[nm_i].len = 0;
-				else
-					ring->slot[nm_i].len = ri.iri_len - crclen;
+				ring->slot[nm_i].len = error ? 0 : ri.iri_len - crclen;
 				ring->slot[nm_i].flags = slot_flags;
 				if (fl->ifl_sds.ifsd_map)
 					bus_dmamap_sync(fl->ifl_ifdi->idi_tag,
-								fl->ifl_sds.ifsd_map[nic_i], BUS_DMASYNC_POSTREAD);
+							fl->ifl_sds.ifsd_map[nic_i], BUS_DMASYNC_POSTREAD);
 				nm_i = nm_next(nm_i, lim);
 				nic_i = nm_next(nic_i, lim);
 			}
@@ -2340,7 +2343,8 @@ iflib_rxeof(iflib_rxq_t rxq, int budget)
 	 */
 	struct mbuf *m, *mh, *mt;
 
-	if (netmap_rx_irq(ctx->ifc_ifp, rxq->ifr_id, &budget)) {
+	ifp = ctx->ifc_ifp;
+	if ((ifp->if_capenable & IFCAP_NETMAP) && netmap_rx_irq(ifp, rxq->ifr_id, &budget)) {
 		return (FALSE);
 	}
 
@@ -2369,7 +2373,7 @@ iflib_rxeof(iflib_rxq_t rxq, int budget)
 		rxd_info_zero(&ri);
 		ri.iri_qsidx = rxq->ifr_id;
 		ri.iri_cidx = *cidxp;
-		ri.iri_ifp = ctx->ifc_ifp;
+		ri.iri_ifp = ifp;
 		ri.iri_frags = rxq->ifr_frags;
 		err = ctx->isc_rxd_pkt_get(ctx->ifc_softc, &ri);
 
@@ -2410,7 +2414,6 @@ iflib_rxeof(iflib_rxq_t rxq, int budget)
 	for (i = 0, fl = &rxq->ifr_fl[0]; i < sctx->isc_nfl; i++, fl++)
 		__iflib_fl_refill_lt(ctx, fl, budget + 8);
 
-	ifp = ctx->ifc_ifp;
 	lro_enabled = (if_getcapenable(ifp) & IFCAP_LRO);
 	while (mh != NULL) {
 		m = mh;
@@ -3296,11 +3299,14 @@ _task_fn_tx(void *context)
 {
 	iflib_txq_t txq = context;
 	if_ctx_t ctx = txq->ift_ctx;
+	struct ifnet *ifp = ctx->ifc_ifp;
 
 #ifdef IFLIB_DIAGNOSTICS
 	txq->ift_cpu_exec_count[curcpu]++;
 #endif
 	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
+		return;
+	if (netmap_tx_irq(ifp, txq->ift_id))
 		return;
 	ifmp_ring_check_drainage(txq->ift_br[0], TX_BATCH_SIZE);
 }
@@ -3310,8 +3316,9 @@ _task_fn_rx(void *context)
 {
 	iflib_rxq_t rxq = context;
 	if_ctx_t ctx = rxq->ifr_ctx;
+	struct ifnet *ifp = ctx->ifc_ifp;
 	bool more;
-	int rc;
+	int i, rc;
 
 #ifdef IFLIB_DIAGNOSTICS
 	rxq->ifr_cpu_exec_count[curcpu]++;
@@ -3319,6 +3326,10 @@ _task_fn_rx(void *context)
 	DBG_COUNTER_INC(task_fn_rxs);
 	if (__predict_false(!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)))
 		return;
+	if (ifp->if_capenable & IFCAP_NETMAP) {
+		for (i = 0; i < rxq->ifr_ntxqirq; i++)
+			netmap_tx_irq(ifp, rxq->ifr_txqid[i]);
+	}
 
 	if ((more = iflib_rxeof(rxq, 16 /* XXX */)) == false) {
 		if (ctx->ifc_flags & IFC_LEGACY)
@@ -4461,6 +4472,9 @@ iflib_queues_alloc(if_ctx_t ctx)
 		}
 
 		rxq->ifr_ifdi = ifdip;
+		/* XXX this needs to be changed if #rx queues != #tx queues */
+		rxq->ifr_ntxqirq = 1;
+		rxq->ifr_txqid[0] = i;
 		for (j = 0; j < nrxqs; j++, ifdip++) {
 			if (iflib_dma_alloc(ctx, rxqsizes[j], ifdip, BUS_DMA_NOWAIT)) {
 				device_printf(dev, "Unable to allocate Descriptor memory\n");
