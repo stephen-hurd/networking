@@ -796,11 +796,6 @@ iflib_netmap_txsync(struct netmap_kring *kring, int flags)
 	if_ctx_t ctx = ifp->if_softc;
 	iflib_txq_t txq = &ctx->ifc_txqs[kring->ring_id];
 
-	pkt_info_zero(&pi);
-	pi.ipi_segs = txq->ift_segs;
-	pi.ipi_qsidx = kring->ring_id;
-	pi.ipi_ndescs = 0;
-
 	bus_dmamap_sync(txq->ift_desc_tag, txq->ift_ifdi->idi_map,
 					BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 
@@ -828,6 +823,9 @@ iflib_netmap_txsync(struct netmap_kring *kring, int flags)
 	 */
 
 	nm_i = kring->nr_hwcur;
+	pkt_info_zero(&pi);
+	pi.ipi_segs = txq->ift_segs;
+	pi.ipi_qsidx = kring->ring_id;
 	if (nm_i != head) {	/* we have new packets to send */
 		nic_i = netmap_idx_k2n(kring, nm_i);
 
@@ -839,13 +837,17 @@ iflib_netmap_txsync(struct netmap_kring *kring, int flags)
 		for (n = 0; nm_i != head; n++) {
 			struct netmap_slot *slot = &ring->slot[nm_i];
 			u_int len = slot->len;
-			uint64_t paddr;
+			vm_paddr_t paddr;
 			void *addr = PNMB(na, slot, &paddr);
 			int flags = (slot->flags & NS_REPORT ||
 				nic_i == 0 || nic_i == report_frequency) ?
 				IPI_TX_INTR : 0;
 
 			/* device-specific */
+			pi.ipi_len = len;
+			pi.ipi_segs[0] = paddr;
+			pi.ipi_nsegs = 1;
+			pi.ipi_ndescs = 0;
 			pi.ipi_pidx = nic_i;
 			pi.ipi_flags = flags;
 
