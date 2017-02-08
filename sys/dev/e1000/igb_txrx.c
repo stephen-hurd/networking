@@ -253,9 +253,8 @@ igb_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	bus_dma_segment_t *segs   = pi->ipi_segs;
 	struct em_txbuffer *txbuf;
 	union e1000_adv_tx_desc *txd = NULL;  
-	
 	int                    i, j, first, pidx_last;
-	u32                    olinfo_status, cmd_type_len;
+	u32                    olinfo_status, cmd_type_len, txd_flags;
 
 	pidx_last = olinfo_status = 0;
 	/* Basic descriptor defines */
@@ -267,6 +266,7 @@ igb_isc_txd_encap(void *arg, if_pkt_info_t pi)
 
 	first = i = pi->ipi_pidx;
 
+	txd_flags = pi->ipi_flags & IPI_TX_INTR ? E1000_ADVTXD_DCMD_RS : 0;
 	/* Consume the first descriptor */
         i += igb_tx_ctx_setup(txr, pi, &cmd_type_len, &olinfo_status);
         if (i == scctx->isc_ntxd[0])
@@ -294,10 +294,9 @@ igb_isc_txd_encap(void *arg, if_pkt_info_t pi)
 			i = 0;
 		}
 	}
-	
-	txd->read.cmd_type_len |=
-	    htole32(E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS);
-		
+
+	txd->read.cmd_type_len |= htole32(E1000_TXD_CMD_EOP | txd_flags);
+
 	/* Set the EOP descriptor that will be marked done */
 	txbuf = &txr->tx_buffers[first]; 
 	txbuf->eop = pidx_last;

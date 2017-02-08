@@ -277,13 +277,14 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	bus_dma_segment_t *segs  = pi->ipi_segs;
 	int nsegs                = pi->ipi_nsegs;
 	int csum_flags           = pi->ipi_csum_flags;
-        int i, j, first, pidx_last; 
-	u32                     txd_upper = 0, txd_lower = 0; 
+	int i, j, first, pidx_last;
+	u32 txd_flags, txd_upper = 0, txd_lower = 0;
 	
 	struct em_txbuffer *tx_buffer;
 	struct e1000_tx_desc *ctxd = NULL;
 	bool do_tso, tso_desc; 
-	
+
+	txd_flags = pi->ipi_flags & IPI_TX_INTR ? E1000_TXD_CMD_RS : 0;
 	i = first = pi->ipi_pidx;         
 	do_tso = (csum_flags & CSUM_TSO);
 	tso_desc = FALSE;
@@ -370,9 +371,7 @@ em_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	 * needs End Of Packet (EOP)
 	 * and Report Status (RS)
          */
-        ctxd->lower.data |=
-		htole32(E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS);
-
+        ctxd->lower.data |= htole32(E1000_TXD_CMD_EOP | txd_flags);
 	tx_buffer = &txr->tx_buffers[first];
 	tx_buffer->eop = pidx_last;
 	DPRINTF(iflib_get_dev(sc->ctx), "tx_buffers[%d]->eop = %d ipi_new_pidx=%d\n", first, pidx_last, i);
