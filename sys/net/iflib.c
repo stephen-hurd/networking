@@ -2850,6 +2850,8 @@ calc_next_txd(iflib_txq_t txq, int cidx, uint8_t qid)
 	return (next < end ? next : start);
 }
 
+
+#define TXD_NOTIFY_MASK(txq) (((txq)->ift_size >> 3)-1)
 static int
 iflib_encap(iflib_txq_t txq, struct mbuf **m_headp)
 {
@@ -2861,7 +2863,7 @@ iflib_encap(iflib_txq_t txq, struct mbuf **m_headp)
 	void			*next_txd;
 	bus_dmamap_t		map;
 	struct if_pkt_info	pi;
-	int remap = 0;
+	int notify, mask, remap = 0;
 	int err, nsegs, ndesc, max_segs, pidx, cidx, next, ntxd;
 	bus_dma_tag_t desc_tag;
 
@@ -2965,6 +2967,22 @@ defrag:
 			GROUPTASK_ENQUEUE(&txq->ift_task);
 		return (ENOBUFS);
 	}
+	mask = TXD_NOTIFY_MASK(txq);
+	notify = (pidx + mask) & ~mask;
+#ifdef notyet
+	/*
+	 * On Intel cards we can greatly reduce the number of TX interrupts
+	 * we see by only setting report status on every Nth descriptor.
+	 * However, this also means that the driver will need to keep track
+	 * of the descriptors that RS was set on to check them for the DD bit.
+	 */
+	notify &= (ntxd-1);
+	if (pidx == notify || pidx + nsegs >= notify)
+		pi.ipi_flags |= IPI_TX_INTR;
+#else
+	pi.ipi_flags |= IPI_TX_INTR;
+#endif
+
 	pi.ipi_segs = segs;
 	pi.ipi_nsegs = nsegs;
 
