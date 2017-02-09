@@ -277,7 +277,7 @@ typedef struct iflib_sw_tx_desc_array {
 	bus_dmamap_t    *ifsd_map;         /* bus_dma maps for packet */
 	struct mbuf    **ifsd_m;           /* pkthdr mbufs */
 	uint8_t		*ifsd_flags;
-} iflib_txsd_array_t;
+} if_txsd_vec_t;
 
 
 /* magic number that should be high enough for any hardware */
@@ -285,6 +285,7 @@ typedef struct iflib_sw_tx_desc_array {
 #define IFLIB_MAX_RX_SEGS		32
 #define IFLIB_RX_COPY_THRESH		128
 #define IFLIB_MAX_RX_REFRESH		32
+#define IFLIB_MAX_TX_UPDATE_FREQ	16
 #define IFLIB_QUEUE_IDLE		0
 #define IFLIB_QUEUE_HUNG		1
 #define IFLIB_QUEUE_WORKING		2
@@ -339,19 +340,20 @@ struct iflib_txq {
 
 	/* constant values */
 	if_ctx_t	ift_ctx;
-	struct ifmp_ring        **ift_br;
+	struct ifmp_ring        *ift_br;
 	struct grouptask	ift_task;
 	qidx_t		ift_size;
 	uint16_t	ift_id;
 	struct callout	ift_timer;
 	struct callout	ift_db_check;
 
-	iflib_txsd_array_t	ift_sds;
-	uint8_t			ift_nbr;
-	uint8_t			ift_qstatus;
-	uint8_t			ift_active;
-	uint8_t			ift_closed;
-	int			ift_watchdog_time;
+	if_txsd_vec_t	ift_sds;
+	qidx_t		ift_rs_idx[IFLIB_MAX_TX_UPDATE_FREQ];
+	uint8_t		ift_qstatus;
+	uint8_t		ift_closed;
+	uint8_t		ift_update_freq;
+	uint8_t		ift_update_pidx;
+	uint8_t		ift_update_cidx;
 	struct iflib_filter_info ift_filter_info;
 	bus_dma_tag_t		ift_desc_tag;
 	bus_dma_tag_t		ift_tso_desc_tag;
@@ -2010,7 +2012,7 @@ iflib_timer(void *arg)
 		goto hung;
 
 	if (TXQ_AVAIL(txq) <= 2*scctx->isc_tx_nsegments ||
-	    ifmp_ring_is_stalled(txq->ift_br[0]))
+	    ifmp_ring_is_stalled(txq->ift_br))
 		GROUPTASK_ENQUEUE(&txq->ift_task);
 
 	ctx->ifc_pause_frames = 0;
@@ -2149,7 +2151,7 @@ iflib_stop(if_ctx_t ctx)
 		txq->ift_closed = txq->ift_mbuf_defrag = txq->ift_mbuf_defrag_failed = 0;
 		txq->ift_no_tx_dma_setup = txq->ift_txd_encap_efbig = txq->ift_map_failed = 0;
 		txq->ift_pullups = 0;
-		ifmp_ring_reset_stats(txq->ift_br[0]);
+		ifmp_ring_reset_stats(txq->ift_br);
 		for (j = 0, di = txq->ift_ifdi; j < ctx->ifc_nhwtxqs; j++, di++)
 			bzero((void *)di->idi_vaddr, di->idi_size);
 	}
@@ -2499,7 +2501,7 @@ iflib_txd_deferred_db_check(void * arg)
 	    txq->ift_db_pending >= txq->ift_db_pending_queued)
 		iflib_txd_db_check(txq->ift_ctx, txq, TRUE);
 	txq->ift_db_pending_queued = 0;
-	if (ifmp_ring_is_stalled(txq->ift_br[0]))
+	if (ifmp_ring_is_stalled(txq->ift_br))
 		iflib_txq_check_drain(txq, 4);
 }
 
@@ -2977,7 +2979,6 @@ defrag:
 	}
 	mask = TXD_NOTIFY_MASK(txq);
 	notify = (pidx + mask) & ~mask;
-#ifdef notyet
 	/*
 	 * On Intel cards we can greatly reduce the number of TX interrupts
 	 * we see by only setting report status on every Nth descriptor.
@@ -2985,11 +2986,8 @@ defrag:
 	 * of the descriptors that RS was set on to check them for the DD bit.
 	 */
 	notify &= (ntxd-1);
-	if (pidx == notify || pidx + nsegs >= notify)
+	if (pidx == notify || pidx + nsegs >= notify || 1 /* XXX */)
 		pi.ipi_flags |= IPI_TX_INTR;
-#else
-	pi.ipi_flags |= IPI_TX_INTR;
-#endif
 
 	pi.ipi_segs = segs;
 	pi.ipi_nsegs = nsegs;
@@ -3019,6 +3017,7 @@ defrag:
 		MPASS(pi.ipi_new_pidx != pidx);
 		MPASS(ndesc > 0);
 		txq->ift_in_use += ndesc;
+
 		/*
 		 * We update the last software descriptor again here because there may
 		 * be a sentinel and/or there may be more mbufs than segments
@@ -3159,9 +3158,6 @@ iflib_completed_tx_reclaim(iflib_txq_t txq, int thresh)
 	txq->ift_cleaned += reclaim;
 	txq->ift_in_use -= reclaim;
 
-	if (txq->ift_active == FALSE)
-		txq->ift_active = TRUE;
-
 	return (reclaim);
 }
 
@@ -3189,7 +3185,7 @@ static void
 iflib_txq_check_drain(iflib_txq_t txq, int budget)
 {
 
-	ifmp_ring_check_drainage(txq->ift_br[0], budget);
+	ifmp_ring_check_drainage(txq->ift_br, budget);
 }
 
 static uint32_t
@@ -3334,7 +3330,7 @@ iflib_ifmp_purge(iflib_txq_t txq)
 {
 	struct ifmp_ring *r;
 
-	r = txq->ift_br[0];
+	r = txq->ift_br;
 	r->drain = iflib_txq_drain_free;
 	r->can_drain = iflib_txq_drain_always;
 
@@ -3358,7 +3354,7 @@ _task_fn_tx(void *context)
 		return;
 	if (netmap_tx_irq(ifp, txq->ift_id))
 		return;
-	ifmp_ring_check_drainage(txq->ift_br[0], TX_BATCH_SIZE);
+	ifmp_ring_check_drainage(txq->ift_br, TX_BATCH_SIZE);
 }
 
 static void
@@ -3538,7 +3534,7 @@ iflib_if_transmit(if_t ifp, struct mbuf *m)
 	}
 #endif
 	DBG_COUNTER_INC(tx_seen);
-	err = ifmp_ring_enqueue(txq->ift_br[0], (void **)&m, 1, TX_BATCH_SIZE);
+	err = ifmp_ring_enqueue(txq->ift_br, (void **)&m, 1, TX_BATCH_SIZE);
 
 	if (err) {
 		GROUPTASK_ENQUEUE(&txq->ift_task);
@@ -3546,7 +3542,7 @@ iflib_if_transmit(if_t ifp, struct mbuf *m)
 #ifdef DRIVER_BACKPRESSURE
 		txq->ift_closed = TRUE;
 #endif
-		ifmp_ring_check_drainage(txq->ift_br[0], TX_BATCH_SIZE);
+		ifmp_ring_check_drainage(txq->ift_br, TX_BATCH_SIZE);
 		m_freem(m);
 	} else if (TXQ_AVAIL(txq) < (txq->ift_size >> 1)) {
 		GROUPTASK_ENQUEUE(&txq->ift_task);
@@ -3566,7 +3562,7 @@ iflib_if_qflush(if_t ifp)
 	ctx->ifc_flags |= IFC_QFLUSH;
 	CTX_UNLOCK(ctx);
 	for (i = 0; i < NTXQSETS(ctx); i++, txq++)
-		while (!(ifmp_ring_is_idle(txq->ift_br[0]) || ifmp_ring_is_stalled(txq->ift_br[0])))
+		while (!(ifmp_ring_is_idle(txq->ift_br) || ifmp_ring_is_stalled(txq->ift_br)))
 			iflib_txq_check_drain(txq, 0);
 	CTX_LOCK(ctx);
 	ctx->ifc_flags &= ~IFC_QFLUSH;
@@ -4415,7 +4411,6 @@ iflib_queues_alloc(if_ctx_t ctx)
 	caddr_t *vaddrs;
 	uint64_t *paddrs;
 	struct ifmp_ring **brscp;
-	int nbuf_rings = 1; /* XXX determine dynamically */
 
 	KASSERT(ntxqs > 0, ("number of queues per qset must be at least 1"));
 	KASSERT(nrxqs > 0, ("number of queues per qset must be at least 1"));
@@ -4438,11 +4433,6 @@ iflib_queues_alloc(if_ctx_t ctx)
 	    (iflib_rxq_t) malloc(sizeof(struct iflib_rxq) *
 	    nrxqsets, M_IFLIB, M_NOWAIT | M_ZERO))) {
 		device_printf(dev, "Unable to allocate RX ring memory\n");
-		err = ENOMEM;
-		goto rx_fail;
-	}
-	if (!(brscp = malloc(sizeof(void *) * nbuf_rings * nrxqsets, M_IFLIB, M_NOWAIT | M_ZERO))) {
-		device_printf(dev, "Unable to buf_ring_sc * memory\n");
 		err = ENOMEM;
 		goto rx_fail;
 	}
@@ -4481,7 +4471,6 @@ iflib_queues_alloc(if_ctx_t ctx)
 		/* XXX fix this */
 		txq->ift_timer.c_cpu = cpu;
 		txq->ift_db_check.c_cpu = cpu;
-		txq->ift_nbr = nbuf_rings;
 
 		if (iflib_txsd_alloc(txq)) {
 			device_printf(dev, "Critical Failure setting up TX buffers\n");
@@ -4500,15 +4489,12 @@ iflib_queues_alloc(if_ctx_t ctx)
 			 device_get_nameunit(dev), txq->ift_id);
 		TXDB_LOCK_INIT(txq);
 
-		txq->ift_br = brscp + i*nbuf_rings;
-		for (j = 0; j < nbuf_rings; j++) {
-			err = ifmp_ring_alloc(&txq->ift_br[j], 2048, txq, iflib_txq_drain,
-					      iflib_txq_can_drain, M_IFLIB, M_WAITOK);
-			if (err) {
-				/* XXX free any allocated rings */
-				device_printf(dev, "Unable to allocate buf_ring\n");
-				goto err_tx_desc;
-			}
+		err = ifmp_ring_alloc(&txq->ift_br, 2048, txq, iflib_txq_drain,
+				      iflib_txq_can_drain, M_IFLIB, M_WAITOK);
+		if (err) {
+			/* XXX free any allocated rings */
+			device_printf(dev, "Unable to allocate buf_ring\n");
+			goto err_tx_desc;
 		}
 	}
 
@@ -5396,25 +5382,25 @@ iflib_add_device_sysctl_post(if_ctx_t ctx)
 				   CTLFLAG_RD,
 				   &txq->ift_cleaned, "total cleaned");
 		SYSCTL_ADD_PROC(ctx_list, queue_list, OID_AUTO, "ring_state",
-				CTLTYPE_STRING | CTLFLAG_RD, __DEVOLATILE(uint64_t *, &txq->ift_br[0]->state),
+				CTLTYPE_STRING | CTLFLAG_RD, __DEVOLATILE(uint64_t *, &txq->ift_br->state),
 				0, mp_ring_state_handler, "A", "soft ring state");
 		SYSCTL_ADD_COUNTER_U64(ctx_list, queue_list, OID_AUTO, "r_enqueues",
-				       CTLFLAG_RD, &txq->ift_br[0]->enqueues,
+				       CTLFLAG_RD, &txq->ift_br->enqueues,
 				       "# of enqueues to the mp_ring for this queue");
 		SYSCTL_ADD_COUNTER_U64(ctx_list, queue_list, OID_AUTO, "r_drops",
-				       CTLFLAG_RD, &txq->ift_br[0]->drops,
+				       CTLFLAG_RD, &txq->ift_br->drops,
 				       "# of drops in the mp_ring for this queue");
 		SYSCTL_ADD_COUNTER_U64(ctx_list, queue_list, OID_AUTO, "r_starts",
-				       CTLFLAG_RD, &txq->ift_br[0]->starts,
+				       CTLFLAG_RD, &txq->ift_br->starts,
 				       "# of normal consumer starts in the mp_ring for this queue");
 		SYSCTL_ADD_COUNTER_U64(ctx_list, queue_list, OID_AUTO, "r_stalls",
-				       CTLFLAG_RD, &txq->ift_br[0]->stalls,
+				       CTLFLAG_RD, &txq->ift_br->stalls,
 					       "# of consumer stalls in the mp_ring for this queue");
 		SYSCTL_ADD_COUNTER_U64(ctx_list, queue_list, OID_AUTO, "r_restarts",
-			       CTLFLAG_RD, &txq->ift_br[0]->restarts,
+			       CTLFLAG_RD, &txq->ift_br->restarts,
 				       "# of consumer restarts in the mp_ring for this queue");
 		SYSCTL_ADD_COUNTER_U64(ctx_list, queue_list, OID_AUTO, "r_abdications",
-				       CTLFLAG_RD, &txq->ift_br[0]->abdications,
+				       CTLFLAG_RD, &txq->ift_br->abdications,
 				       "# of consumer abdications in the mp_ring for this queue");
 	}
 
