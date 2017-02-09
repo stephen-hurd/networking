@@ -302,6 +302,7 @@ typedef struct iflib_sw_tx_desc_array {
 #define	IFC_DMAR		0x08
 #define	IFC_SC_ALLOCATED	0x10
 #define	IFC_INIT_DONE		0x20
+#define	IFC_PREFETCH		0x40
 
 
 #define CSUM_OFFLOAD		(CSUM_IP_TSO|CSUM_IP6_TSO|CSUM_IP| \
@@ -2193,6 +2194,7 @@ prefetch_pkts(iflib_fl_t fl, int cidx)
 	int nrxd = fl->ifl_size;
 	caddr_t next_rxd;
 
+
 	nextptr = (cidx + CACHE_PTR_INCREMENT) & (nrxd-1);
 	prefetch(&fl->ifl_sds.ifsd_m[nextptr]);
 	prefetch(&fl->ifl_sds.ifsd_cl[nextptr]);
@@ -2226,7 +2228,8 @@ rxd_frag_to_sd(iflib_rxq_t rxq, if_rxd_frag_t irf, int *cltype, int unload, ifli
 	if (cltype)
 		fl->ifl_cl_dequeued++;
 #endif
-	prefetch_pkts(fl, cidx);
+	if (rxq->ifr_ctx->ifc_flags & IFC_PREFETCH)
+		prefetch_pkts(fl, cidx);
 	if (fl->ifl_sds.ifsd_map != NULL) {
 		next = (cidx + CACHE_PTR_INCREMENT) & (fl->ifl_size-1);
 		prefetch(&fl->ifl_sds.ifsd_map[next]);
@@ -2888,19 +2891,21 @@ iflib_encap(iflib_txq_t txq, struct mbuf **m_headp)
 	 */
 	cidx = txq->ift_cidx;
 	pidx = txq->ift_pidx;
-	next = (cidx + CACHE_PTR_INCREMENT) & (ntxd-1);
-	if (!(ctx->ifc_flags & IFLIB_HAS_TXCQ)) {
-		next_txd = calc_next_txd(txq, cidx, 0);
-		prefetch(next_txd);
-	}
+	if (ctx->ifc_flags & IFC_PREFETCH) {
+		next = (cidx + CACHE_PTR_INCREMENT) & (ntxd-1);
+		if (!(ctx->ifc_flags & IFLIB_HAS_TXCQ)) {
+			next_txd = calc_next_txd(txq, cidx, 0);
+			prefetch(next_txd);
+		}
 
-	/* prefetch the next cache line of mbuf pointers and flags */
-	prefetch(&txq->ift_sds.ifsd_m[next]);
-	if (txq->ift_sds.ifsd_map != NULL) {
-		prefetch(&txq->ift_sds.ifsd_map[next]);
-		map = txq->ift_sds.ifsd_map[pidx];
-		next = (cidx + CACHE_LINE_SIZE) & (ntxd-1);
-		prefetch(&txq->ift_sds.ifsd_flags[next]);
+		/* prefetch the next cache line of mbuf pointers and flags */
+		prefetch(&txq->ift_sds.ifsd_m[next]);
+		if (txq->ift_sds.ifsd_map != NULL) {
+			prefetch(&txq->ift_sds.ifsd_map[next]);
+			map = txq->ift_sds.ifsd_map[pidx];
+			next = (cidx + CACHE_LINE_SIZE) & (ntxd-1);
+			prefetch(&txq->ift_sds.ifsd_flags[next]);
+		}
 	}
 
 	if (m_head->m_pkthdr.csum_flags & CSUM_TSO) {
@@ -3079,6 +3084,7 @@ iflib_tx_desc_free(iflib_txq_t txq, int n)
 	struct mbuf *m, **ifsd_m;
 	uint8_t *ifsd_flags;
 	bus_dmamap_t *ifsd_map;
+	bool do_prefetch;
 
 	cidx = txq->ift_cidx;
 	gen = txq->ift_gen;
@@ -3088,11 +3094,13 @@ iflib_tx_desc_free(iflib_txq_t txq, int n)
 	ifsd_flags = txq->ift_sds.ifsd_flags;
 	ifsd_m = txq->ift_sds.ifsd_m;
 	ifsd_map = txq->ift_sds.ifsd_map;
+	do_prefetch = (txq->ift_ctx->ifc_flags & IFC_PREFETCH);
 
 	while (n--) {
-		prefetch(ifsd_m[(cidx + 3) & mask]);
-		prefetch(ifsd_m[(cidx + 4) & mask]);
-
+		if (do_prefetch) {
+			prefetch(ifsd_m[(cidx + 3) & mask]);
+			prefetch(ifsd_m[(cidx + 4) & mask]);
+		}
 		if (ifsd_m[cidx] != NULL) {
 			prefetch(&ifsd_m[(cidx + CACHE_PTR_INCREMENT) & mask]);
 			prefetch(&ifsd_flags[(cidx + CACHE_PTR_INCREMENT) & mask]);
@@ -3170,9 +3178,10 @@ _ring_peek_one(struct ifmp_ring *r, int cidx, int offset, int remaining)
 	size = r->size;
 	next = (cidx + CACHE_PTR_INCREMENT) & (size-1);
 	items = __DEVOLATILE(struct mbuf **, &r->items[0]);
-	prefetch(&items[next]);
+
 	prefetch(items[(cidx + offset) & (size-1)]);
 	if (remaining > 1) {
+		prefetch(&items[next]);
 		prefetch(items[(cidx + offset + 1) & (size-1)]);
 		prefetch(items[(cidx + offset + 2) & (size-1)]);
 		prefetch(items[(cidx + offset + 3) & (size-1)]);
@@ -3205,6 +3214,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 	if_t ifp = ctx->ifc_ifp;
 	struct mbuf **mp, *m;
 	int i, count, consumed, pkt_sent, bytes_sent, mcast_sent, avail, err, in_use_prev, desc_used;
+	bool do_prefetch;
 
 	if (__predict_false(!(if_getdrvflags(ifp) & IFF_DRV_RUNNING) ||
 			    !LINK_ACTIVE(ctx))) {
@@ -3238,9 +3248,11 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		printf("%s avail=%d ifc_flags=%x txq_avail=%d ", __FUNCTION__,
 		       avail, ctx->ifc_flags, TXQ_AVAIL(txq));
 #endif
-
+	do_prefetch = (ctx->ifc_flags & IFC_PREFETCH);
 	for (desc_used = i = 0; i < count && TXQ_AVAIL(txq) > MAX_TX_DESC(ctx) + 2; i++) {
-		mp = _ring_peek_one(r, cidx, i, count - i);
+		int rem = do_prefetch ? count - i : 0;
+
+		mp = _ring_peek_one(r, cidx, i, rem);
 		MPASS(mp != NULL && *mp != NULL);
 		in_use_prev = txq->ift_in_use;
 		if ((err = iflib_encap(txq, mp)) == ENOBUFS) {
@@ -4973,6 +4985,8 @@ iflib_link_state_change(if_ctx_t ctx, int link_state, uint64_t baudrate)
 	iflib_txq_t txq = ctx->ifc_txqs;
 
 	if_setbaudrate(ifp, baudrate);
+	if (baudrate >= IF_Gbps(10))
+		ctx->ifc_flags |= IFC_PREFETCH;
 
 	/* If link down, disable watchdog */
 	if ((ctx->ifc_link_state == LINK_STATE_UP) && (link_state == LINK_STATE_DOWN)) {
