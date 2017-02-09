@@ -477,17 +477,13 @@ static inline void
 pkt_info_zero(if_pkt_info_t pi)
 {
 	if_pkt_info_pad_t pi_pad;
-	int i;
 
 	pi_pad = (if_pkt_info_pad_t)pi;
-	for (i = 0; i < PKT_LOOP_BOUND; i += 3) {
-		pi_pad->pkt_val[i] = 0;
-		pi_pad->pkt_val[i+1] = 0;
-		pi_pad->pkt_val[i+2] = 0;
-	}
+	pi_pad->pkt_val[0] = 0; pi_pad->pkt_val[1] = 0; pi_pad->pkt_val[2] = 0;
+	pi_pad->pkt_val[3] = 0; pi_pad->pkt_val[4] = 0; pi_pad->pkt_val[5] = 0;
 #ifndef __LP64__
-	pi_pad->pkt_val[PKT_INFO_SIZE-2] = 0;
-	pi_pad->pkt_val[PKT_INFO_SIZE-1] = 0;
+	pi_pad->pkt_val[6] = 0; pi_pad->pkt_val[7] = 0; pi_pad->pkt_val[8] = 0;
+	pi_pad->pkt_val[9] = 0; pi_pad->pkt_val[10] = 0;
 #endif	
 }
 
