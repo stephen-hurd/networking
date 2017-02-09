@@ -37,6 +37,12 @@
 #include <sys/nv.h>
 #include <sys/gtaskqueue.h>
 
+/*
+ * The value type for indexing, limits max descriptors
+ * to 65535 can be conditionally redefined to uint32_t
+ * in the future if the need arises.
+ */
+typedef uint16_t qidx_t;
 
 /*
  * Most cards can handle much larger TSO requests
@@ -63,7 +69,7 @@ typedef struct if_int_delay_info  *if_int_delay_info_t;
 
 typedef struct if_rxd_frag {
 	uint8_t irf_flid;
-	uint16_t irf_idx;
+	qidx_t irf_idx;
 	uint16_t irf_len;
 } *if_rxd_frag_t;
 
@@ -73,7 +79,7 @@ typedef struct if_rxd_info {
 	uint16_t iri_vtag;		/* vlan tag - if flag set */
 	/* XXX redundant with the new irf_len field */
 	uint16_t iri_len;		/* packet length */
-	uint16_t iri_cidx;		/* consumer index of cq */
+	qidx_t iri_cidx;		/* consumer index of cq */
 	struct ifnet *iri_ifp;		/* some drivers >1 interface per softc */
 
 	/* updated by driver */
@@ -90,9 +96,9 @@ typedef struct if_rxd_info {
 
 typedef struct if_rxd_update {
 	uint64_t	*iru_paddrs;
-	uint32_t	*iru_idxs;
 	caddr_t		*iru_vaddrs;
-	uint32_t	iru_pidx;
+	qidx_t		*iru_idxs;
+	qidx_t		iru_pidx;
 	uint16_t	iru_qsidx;
 	uint16_t	iru_count;
 	uint16_t	iru_buf_size;
@@ -104,30 +110,30 @@ typedef struct if_rxd_update {
 #define IPI_TX_IPV6	0x4		/* ethertype IPv6 */
 
 typedef struct if_pkt_info {
-	bus_dma_segment_t		*ipi_segs;	/* physical addresses */
-	uint32_t			ipi_len;	/* packet length */
-	uint16_t			ipi_qsidx;	/* queue set index */
-	uint16_t			ipi_nsegs;	/* number of segments */
+	bus_dma_segment_t	*ipi_segs;	/* physical addresses */
+	uint32_t		ipi_len;	/* packet length */
+	uint16_t		ipi_qsidx;	/* queue set index */
+	qidx_t			ipi_nsegs;	/* number of segments */
 
-	uint16_t			ipi_ndescs;	/* number of descriptors used by encap */
-	uint16_t			ipi_flags;	/* iflib per-packet flags */
-	uint32_t			ipi_pidx;	/* start pidx for encap */
-	uint32_t			ipi_new_pidx;	/* next available pidx post-encap */
+	qidx_t			ipi_ndescs;	/* number of descriptors used by encap */
+	uint16_t		ipi_flags;	/* iflib per-packet flags */
+	qidx_t			ipi_pidx;	/* start pidx for encap */
+	qidx_t			ipi_new_pidx;	/* next available pidx post-encap */
 	/* offload handling */
 	uint8_t			ipi_ehdrlen;	/* ether header length */
 	uint8_t			ipi_ip_hlen;	/* ip header length */
 	uint8_t			ipi_tcp_hlen;	/* tcp header length */
 	uint8_t			ipi_ipproto;	/* ip protocol */
 
-	uint64_t			ipi_csum_flags;	/* packet checksum flags */
-	uint16_t			ipi_tso_segsz;	/* tso segment size */
-	uint16_t			ipi_vtag;	/* VLAN tag */
-	uint16_t			ipi_etype;	/* ether header type */
+	uint32_t		ipi_csum_flags;	/* packet checksum flags */
+	uint16_t		ipi_tso_segsz;	/* tso segment size */
+	uint16_t		ipi_vtag;	/* VLAN tag */
+	uint16_t		ipi_etype;	/* ether header type */
 	uint8_t			ipi_tcp_hflags;	/* tcp header flags */
 	uint8_t			ipi_mflags;	/* packet mbuf flags */
 
-	uint32_t			ipi_tcp_seq;	/* tcp seqno */
-	uint32_t			ipi_tcp_sum;	/* tcp csum */
+	uint32_t		ipi_tcp_seq;	/* tcp seqno */
+	uint32_t		ipi_tcp_sum;	/* tcp csum */
 } *if_pkt_info_t;
 
 typedef struct if_irq {

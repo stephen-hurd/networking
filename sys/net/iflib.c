@@ -94,7 +94,8 @@ __FBSDID("$FreeBSD$");
 #endif
 
 /*
- * enable accounting of every mbuf as it comes in to and goes out of iflib's software descriptor references
+ * enable accounting of every mbuf as it comes in to and goes out of
+ * iflib's software descriptor references
  */
 #define MEMORY_LOGGING 0
 /*
@@ -185,8 +186,8 @@ struct iflib_ctx {
 	uint16_t ifc_sysctl_nrxqs;
 	uint16_t ifc_sysctl_qs_eq_override;
 
-	uint16_t ifc_sysctl_ntxds[8];
-	uint16_t ifc_sysctl_nrxds[8];
+	qidx_t ifc_sysctl_ntxds[8];
+	qidx_t ifc_sysctl_nrxds[8];
 	struct if_txrx ifc_txrx;
 #define isc_txd_encap  ifc_txrx.ift_txd_encap
 #define isc_txd_flush  ifc_txrx.ift_txd_flush
@@ -307,10 +308,10 @@ typedef struct iflib_sw_tx_desc_array {
 				 CSUM_IP_UDP|CSUM_IP_TCP|CSUM_IP_SCTP| \
 				 CSUM_IP6_UDP|CSUM_IP6_TCP|CSUM_IP6_SCTP)
 struct iflib_txq {
-	uint16_t	ift_in_use;
-	uint16_t	ift_cidx;
-	uint16_t	ift_cidx_processed;
-	uint16_t	ift_pidx;
+	qidx_t		ift_in_use;
+	qidx_t		ift_cidx;
+	qidx_t		ift_cidx_processed;
+	qidx_t		ift_pidx;
 	uint8_t		ift_gen;
 	uint8_t		ift_db_pending;
 	uint8_t		ift_db_pending_queued;
@@ -339,7 +340,7 @@ struct iflib_txq {
 	if_ctx_t	ift_ctx;
 	struct ifmp_ring        **ift_br;
 	struct grouptask	ift_task;
-	uint16_t	ift_size;
+	qidx_t		ift_size;
 	uint16_t	ift_id;
 	struct callout	ift_timer;
 	struct callout	ift_db_check;
@@ -364,9 +365,9 @@ struct iflib_txq {
 } __aligned(CACHE_LINE_SIZE);
 
 struct iflib_fl {
-	uint16_t	ifl_cidx;
-	uint16_t	ifl_pidx;
-	uint16_t	ifl_credits;
+	qidx_t		ifl_cidx;
+	qidx_t		ifl_pidx;
+	qidx_t		ifl_credits;
 	uint8_t		ifl_gen;
 	uint8_t		ifl_rxd_size;
 #if MEMORY_LOGGING
@@ -378,7 +379,7 @@ struct iflib_fl {
 	/* implicit pad */
 
 	/* constant */
-	uint16_t	ifl_size;
+	qidx_t		ifl_size;
 	uint16_t	ifl_buf_size;
 	uint16_t	ifl_cltype;
 	uma_zone_t	ifl_zone;
@@ -389,13 +390,13 @@ struct iflib_fl {
 	iflib_dma_info_t	ifl_ifdi;
 	uint64_t	ifl_bus_addrs[IFLIB_MAX_RX_REFRESH] __aligned(CACHE_LINE_SIZE);
 	caddr_t		ifl_vm_addrs[IFLIB_MAX_RX_REFRESH];
-	uint32_t	ifl_rxd_idxs[IFLIB_MAX_RX_REFRESH];
+	qidx_t	ifl_rxd_idxs[IFLIB_MAX_RX_REFRESH];
 }  __aligned(CACHE_LINE_SIZE);
 
-static inline int
-get_inuse(int size, int cidx, int pidx, int gen)
+static inline qidx_t
+get_inuse(int size, qidx_t cidx, qidx_t pidx, uint8_t gen)
 {
-	int used;
+	qidx_t used;
 
 	if (pidx > cidx)
 		used = pidx - cidx;
@@ -421,9 +422,9 @@ struct iflib_rxq {
 	 * these are the cq cidx and pidx. Otherwise
 	 * these are unused.
 	 */
-	uint16_t	ifr_size;
-	uint16_t	ifr_cq_cidx;
-	uint16_t	ifr_cq_pidx;
+	qidx_t		ifr_size;
+	qidx_t		ifr_cq_cidx;
+	qidx_t		ifr_cq_pidx;
 	uint8_t		ifr_cq_gen;
 	uint8_t		ifr_fl_offset;
 
@@ -449,11 +450,11 @@ struct iflib_rxq {
 
 /* multiple of word size */
 #ifdef __LP64__
-#define PKT_INFO_SIZE	7
+#define PKT_INFO_SIZE	6
 #define RXD_INFO_SIZE	5
 #define PKT_TYPE uint64_t
 #else
-#define PKT_INFO_SIZE	13
+#define PKT_INFO_SIZE	11
 #define RXD_INFO_SIZE	8
 #define PKT_TYPE uint32_t
 #endif
@@ -483,7 +484,10 @@ pkt_info_zero(if_pkt_info_t pi)
 		pi_pad->pkt_val[i+1] = 0;
 		pi_pad->pkt_val[i+2] = 0;
 	}
+#ifndef __LP64__
+	pi_pad->pkt_val[PKT_INFO_SIZE-2] = 0;
 	pi_pad->pkt_val[PKT_INFO_SIZE-1] = 0;
+#endif	
 }
 
 static inline void
@@ -688,7 +692,7 @@ static void iflib_tx_structures_free(if_ctx_t ctx);
 static void iflib_rx_structures_free(if_ctx_t ctx);
 static int iflib_queues_alloc(if_ctx_t ctx);
 static int iflib_tx_credits_update(if_ctx_t ctx, iflib_txq_t txq);
-static int iflib_rxd_avail(if_ctx_t ctx, iflib_rxq_t rxq, int cidx, int budget);
+static int iflib_rxd_avail(if_ctx_t ctx, iflib_rxq_t rxq, qidx_t cidx, qidx_t budget);
 static int iflib_qset_structures_setup(if_ctx_t ctx);
 static int iflib_msix_init(if_ctx_t ctx);
 static int iflib_legacy_setup(if_ctx_t ctx, driver_filter_t filter, void *filterarg, int *rid, char *str);
@@ -966,7 +970,7 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 		for (fl = rxq->ifr_fl, i = 0; i < rxq->ifr_nfl; i++, fl++) {
 			nic_i = fl->ifl_cidx;
 			nm_i = netmap_idx_n2k(kring, nic_i);
-			avail = ctx->isc_rxd_available(ctx->ifc_softc, kring->ring_id, nic_i, INT_MAX);
+			avail = ctx->isc_rxd_available(ctx->ifc_softc, kring->ring_id, nic_i, USHRT_MAX);
 			for (n = 0; avail > 0; n++, avail--) {
 				rxd_info_zero(&ri);
 				error = ctx->isc_rxd_pkt_get(ctx->ifc_softc, &ri);
@@ -2166,7 +2170,7 @@ iflib_stop(if_ctx_t ctx)
 static inline caddr_t
 calc_next_rxd(iflib_fl_t fl, int cidx)
 {
-	uint16_t size;
+	qidx_t size;
 	int nrxd;
 	caddr_t start, end, cur, next;
 
@@ -2342,18 +2346,19 @@ iflib_rxd_pkt_get(iflib_rxq_t rxq, if_rxd_info_t ri)
 }
 
 static bool
-iflib_rxeof(iflib_rxq_t rxq, int budget)
+iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 {
 	if_ctx_t ctx = rxq->ifr_ctx;
 	if_shared_ctx_t sctx = ctx->ifc_sctx;
 	if_softc_ctx_t scctx = &ctx->ifc_softc_ctx;
 	int avail, i;
-	uint16_t *cidxp;
+	qidx_t *cidxp;
 	struct if_rxd_info ri;
 	int err, budget_left, rx_bytes, rx_pkts;
 	iflib_fl_t fl;
 	struct ifnet *ifp;
 	int lro_enabled;
+
 	/*
 	 * XXX early demux data packets so that if_input processing only handles
 	 * acks in interrupt context
@@ -2361,8 +2366,10 @@ iflib_rxeof(iflib_rxq_t rxq, int budget)
 	struct mbuf *m, *mh, *mt;
 
 	ifp = ctx->ifc_ifp;
-	if ((ifp->if_capenable & IFCAP_NETMAP) && netmap_rx_irq(ifp, rxq->ifr_id, &budget)) {
-		return (FALSE);
+	if (ifp->if_capenable & IFCAP_NETMAP) {
+		u_int budget32 = budget;
+		if (netmap_rx_irq(ifp, rxq->ifr_id, &budget32))
+			return (FALSE);
 	}
 
 	mh = mt = NULL;
@@ -2834,7 +2841,7 @@ err:
 static inline caddr_t
 calc_next_txd(iflib_txq_t txq, int cidx, uint8_t qid)
 {
-	uint16_t size;
+	qidx_t size;
 	int ntxd;
 	caddr_t start, end, cur, next;
 
@@ -5000,7 +5007,7 @@ iflib_tx_credits_update(if_ctx_t ctx, iflib_txq_t txq)
 }
 
 static int
-iflib_rxd_avail(if_ctx_t ctx, iflib_rxq_t rxq, int cidx, int budget)
+iflib_rxd_avail(if_ctx_t ctx, iflib_rxq_t rxq, qidx_t cidx, qidx_t budget)
 {
 
 	return (ctx->isc_rxd_available(ctx->ifc_softc, rxq->ifr_id, cidx,
@@ -5217,7 +5224,7 @@ mp_ndesc_handler(SYSCTL_HANDLER_ARGS)
 	if_ctx_t ctx = (void *)arg1;
 	enum iflib_ndesc_handler type = arg2;
 	char buf[256] = {0};
-	uint16_t *ndesc;
+	qidx_t *ndesc;
 	char *p, *next;
 	int nqs, rc, i;
 
