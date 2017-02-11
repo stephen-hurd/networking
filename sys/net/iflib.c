@@ -286,6 +286,7 @@ typedef struct iflib_sw_tx_desc_array {
 #define IFLIB_RX_COPY_THRESH		128
 #define IFLIB_MAX_RX_REFRESH		32
 #define IFLIB_MAX_TX_UPDATE_FREQ	16
+#define IFLIB_DEFAULT_TX_UPDATE_FREQ	8
 #define IFLIB_QUEUE_IDLE		0
 #define IFLIB_QUEUE_HUNG		1
 #define IFLIB_QUEUE_WORKING		2
@@ -348,12 +349,9 @@ struct iflib_txq {
 	struct callout	ift_db_check;
 
 	if_txsd_vec_t	ift_sds;
-	qidx_t		ift_rs_idx[IFLIB_MAX_TX_UPDATE_FREQ];
 	uint8_t		ift_qstatus;
 	uint8_t		ift_closed;
 	uint8_t		ift_update_freq;
-	uint8_t		ift_update_pidx;
-	uint8_t		ift_update_cidx;
 	struct iflib_filter_info ift_filter_info;
 	bus_dma_tag_t		ift_desc_tag;
 	bus_dma_tag_t		ift_tso_desc_tag;
@@ -1567,9 +1565,12 @@ iflib_txq_setup(iflib_txq_t txq)
 
 	/* Set number of descriptors available */
 	txq->ift_qstatus = IFLIB_QUEUE_IDLE;
+	/* XXX make configurable */
+	txq->ift_update_freq = IFLIB_DEFAULT_TX_UPDATE_FREQ;
 
 	/* Reset indices */
-	txq->ift_cidx_processed = txq->ift_pidx = txq->ift_cidx = txq->ift_npending = 0;
+	txq->ift_cidx_processed = 0;
+	txq->ift_pidx = txq->ift_cidx = txq->ift_npending = 0;
 	txq->ift_size = scctx->isc_ntxd[txq->ift_br_offset];
 
 	for (i = 0, di = txq->ift_ifdi; i < ctx->ifc_nhwtxqs; i++, di++)
@@ -2859,7 +2860,7 @@ calc_next_txd(iflib_txq_t txq, int cidx, uint8_t qid)
 }
 
 
-#define TXD_NOTIFY_MASK(txq) (((txq)->ift_size >> 3)-1)
+#define TXD_NOTIFY_MASK(txq) (((txq)->ift_size / (txq)->ift_update_freq)-1)
 static int
 iflib_encap(iflib_txq_t txq, struct mbuf **m_headp)
 {
@@ -2985,8 +2986,7 @@ defrag:
 	 * However, this also means that the driver will need to keep track
 	 * of the descriptors that RS was set on to check them for the DD bit.
 	 */
-	notify &= (ntxd-1);
-	if (pidx == notify || pidx + nsegs >= notify || 1 /* XXX */)
+	if (pidx == notify || pidx + nsegs > notify)
 		pi.ipi_flags |= IPI_TX_INTR;
 
 	pi.ipi_segs = segs;
@@ -3195,7 +3195,7 @@ iflib_txq_can_drain(struct ifmp_ring *r)
 	if_ctx_t ctx = txq->ift_ctx;
 
 	return ((TXQ_AVAIL(txq) > MAX_TX_DESC(ctx) + 2) ||
-		ctx->isc_txd_credits_update(ctx->ifc_softc, txq->ift_id, txq->ift_cidx_processed, false));
+		ctx->isc_txd_credits_update(ctx->ifc_softc, txq->ift_id, false));
 }
 
 static uint32_t
@@ -4985,12 +4985,12 @@ iflib_tx_credits_update(if_ctx_t ctx, iflib_txq_t txq)
 	int credits;
 #ifdef INVARIANTS
 	int credits_pre = txq->ift_cidx_processed;
-#endif	
+#endif
 
 	if (ctx->isc_txd_credits_update == NULL)
 		return (0);
 
-	if ((credits = ctx->isc_txd_credits_update(ctx->ifc_softc, txq->ift_id, txq->ift_cidx_processed, true)) == 0)
+	if ((credits = ctx->isc_txd_credits_update(ctx->ifc_softc, txq->ift_id, true)) == 0)
 		return (0);
 
 	txq->ift_processed += credits;

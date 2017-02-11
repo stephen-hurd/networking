@@ -292,7 +292,6 @@ static int	em_set_flowcntl(SYSCTL_HANDLER_ARGS);
 static int	em_sysctl_eee(SYSCTL_HANDLER_ARGS);
 static void     em_if_led_func(if_ctx_t ctx, int onoff);
 
-static void	em_init_tx_ring(struct em_tx_queue *que);
 static int	em_get_regs(SYSCTL_HANDLER_ARGS); 
 
 static void	lem_smartspeed(struct adapter *adapter);
@@ -618,7 +617,6 @@ static int em_get_regs(SYSCTL_HANDLER_ARGS)
 	}
 
 	for (j = 0; j < min(ntxd, 256); j++) {
-		struct em_txbuffer *buf = &txr->tx_buffers[j];
 		unsigned int *ptr = (unsigned int *)&txr->tx_base[j];
 
 		sbuf_printf(sb, "\tTXD[%03d] [0]: %08x [1]: %08x [2]: %08x [3]: %08x  eop: %d DD=%d\n",
@@ -644,20 +642,6 @@ static void *
 igb_register(device_t dev)
 {
 	return (igb_sctx); 
-}
-
-static void
-em_init_tx_ring(struct em_tx_queue *que)
-{
-	struct adapter *sc = que->adapter;
-	if_softc_ctx_t scctx = sc->shared;
-	struct tx_ring *txr = &que->txr;
-	struct em_txbuffer *tx_buffer;
-
-	tx_buffer = txr->tx_buffers;
-	for (int i = 0; i < scctx->isc_ntxd[0]; i++, tx_buffer++) {
-		tx_buffer->eop = -1;
-	}
 }
 
 static int
@@ -2581,15 +2565,14 @@ em_if_tx_queues_alloc(if_ctx_t ctx, caddr_t *vaddrs, uint64_t *paddrs, int ntxqs
 	     /* Set up some basics */
 	     struct tx_ring *txr = &que->txr;
 	     txr->adapter = que->adapter = adapter;
-	     txr->que = que; 
 	     que->me = txr->me =  i;
 
-	     /* Allocate transmit buffer memory */
-	  if (!(txr->tx_buffers = (struct em_txbuffer *) malloc(sizeof(struct em_txbuffer) * scctx->isc_ntxd[0], M_DEVBUF, M_NOWAIT | M_ZERO))) {
-	       device_printf(iflib_get_dev(ctx), "failed to allocate tx_buffer memory\n");
-	       error = ENOMEM;
-	       goto fail; 
-	  }
+	     /* Allocate report status array */
+	     if (!(txr->tx_rsq = (qidx_t *) malloc(sizeof(qidx_t) * scctx->isc_ntxd[0], M_DEVBUF, M_NOWAIT | M_ZERO))) {
+		     device_printf(iflib_get_dev(ctx), "failed to allocate rs_idxs memory\n");
+		     error = ENOMEM;
+		     goto fail;
+	     }
 
 	  /* get the virtual and physical address of the hardware queues */
 	  txr->tx_base = (struct e1000_tx_desc *)vaddrs[i*ntxqs];
@@ -2654,11 +2637,11 @@ em_if_queues_free(if_ctx_t ctx)
 	if (tx_que != NULL) {
 	  for (int i = 0; i < adapter->tx_num_queues; i++, tx_que++) {
 		struct tx_ring *txr = &tx_que->txr; 		
-		if (txr->tx_buffers == NULL)
+		if (txr->tx_rsq == NULL)
 			break; 
 
-		free(txr->tx_buffers, M_DEVBUF);
-		txr->tx_buffers = NULL; 
+		free(txr->tx_rsq, M_DEVBUF);
+		txr->tx_rsq = NULL;
 	  }
 	  free(adapter->tx_queues, M_DEVBUF);
 	  adapter->tx_queues = NULL; 
@@ -2700,9 +2683,6 @@ em_initialize_transmit_unit(if_ctx_t ctx)
 	        que = &adapter->tx_queues[i];
 		txr = &que->txr;
 		bus_addr = txr->tx_paddr;
-
-                /*Enable all queues */
-		em_init_tx_ring(que);
 
 		/* Clear checksum offload context. */
 		offp = (caddr_t)&txr->csum_flags;
