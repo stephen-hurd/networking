@@ -285,7 +285,8 @@ typedef struct iflib_sw_tx_desc_array {
 #define IFLIB_MAX_RX_SEGS		32
 #define IFLIB_RX_COPY_THRESH		128
 #define IFLIB_MAX_RX_REFRESH		32
-#define IFLIB_MAX_TX_UPDATE_FREQ	16
+/* The minimum descriptors per second before we start coalescing */
+#define IFLIB_MIN_DESC_SEC		4096
 #define IFLIB_DEFAULT_TX_UPDATE_FREQ	8
 #define IFLIB_QUEUE_IDLE		0
 #define IFLIB_QUEUE_HUNG		1
@@ -294,7 +295,7 @@ typedef struct iflib_sw_tx_desc_array {
 #define IFLIB_MAX_TX_SHARED_INTR	4
 
 /* this should really scale with ring size - this is a fairly arbitrary value */
-#define TX_BATCH_SIZE			16
+#define TX_BATCH_SIZE			32
 
 #define IFLIB_RESTART_BUDGET		8
 
@@ -323,6 +324,7 @@ struct iflib_txq {
 	/* implicit pad */
 	uint8_t		ift_txd_size[8];
 	uint64_t	ift_processed;
+	uint64_t	ift_processed_last;
 	uint64_t	ift_cleaned;
 #if MEMORY_LOGGING
 	uint64_t	ift_enqueued;
@@ -351,6 +353,7 @@ struct iflib_txq {
 	uint8_t		ift_qstatus;
 	uint8_t		ift_closed;
 	uint8_t		ift_update_freq;
+	uint8_t		ift_coalescing;
 	struct iflib_filter_info ift_filter_info;
 	bus_dma_tag_t		ift_desc_tag;
 	bus_dma_tag_t		ift_tso_desc_tag;
@@ -2005,10 +2008,15 @@ iflib_timer(void *arg)
 		goto hung;
 
 	/*
-	 * Grab any dangling packets until tx interrupt cleaning
-	 * is sorted
+	 * There is no benefit, and a potential cost to doing tx coalescing
+	 * when we're consuming fewer than 4k descriptors per descriptors
+	 * per second. 
 	 */
+	txq->ift_coalescing = (txq->ift_processed - txq->ift_processed_last > IFLIB_MIN_DESC_SEC/2);
+	txq->ift_processed_last = txq->ift_processed;
+	/* handle any laggards */
 	GROUPTASK_ENQUEUE(&txq->ift_task);
+
 	ctx->ifc_pause_frames = 0;
 	if (if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING) 
 		callout_reset_on(&txq->ift_timer, hz/2, iflib_timer, txq, txq->ift_timer.c_cpu);
@@ -2458,6 +2466,16 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 #endif
 	if (avail)
 		return true;
+	/*
+	 * Handle any pending updates
+	 */
+	for (i = 0; i < rxq->ifr_ntxqirq; i++) {
+		qidx_t txqid = rxq->ifr_txqid[i];
+
+		if (ctx->isc_txd_credits_update(ctx->ifc_softc, txqid, false))
+			GROUPTASK_ENQUEUE(&ctx->ifc_txqs[txqid].ift_task);
+	}
+
 	return (iflib_rxd_avail(ctx, rxq, *cidxp, 1));
 }
 
@@ -3161,8 +3179,8 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 	struct ifnet *ifp = ctx->ifc_ifp;
 	struct mbuf **mp, *m;
 	int i, count, consumed, pkt_sent, bytes_sent, mcast_sent, avail;
-	int reclaimed, err, in_use_prev, desc_used;
-	bool do_prefetch, coalesce;
+	int reclaimed, err, in_use_prev, desc_used, mask;
+	bool do_prefetch, ring;
 
 	if (__predict_false(!(if_getdrvflags(ifp) & IFF_DRV_RUNNING) ||
 			    !LINK_ACTIVE(ctx))) {
@@ -3196,18 +3214,21 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		       avail, ctx->ifc_flags, TXQ_AVAIL(txq));
 #endif
 	do_prefetch = (ctx->ifc_flags & IFC_PREFETCH);
-	coalesce = ((txq->ift_in_use > TXD_NOTIFY_MASK(txq)*2) && !iflib_min_tx_latency);
+	mask = TXD_NOTIFY_MASK(txq);
+	ring = false;
 	for (desc_used = i = 0; i < count && TXQ_AVAIL(txq) > MAX_TX_DESC(ctx) + 2; i++) {
-		int rem = do_prefetch ? count - i : 0;
+		int pidx_prev, notify, rem = do_prefetch ? count - i : 0;
 
 		mp = _ring_peek_one(r, cidx, i, rem);
 		MPASS(mp != NULL && *mp != NULL);
 		in_use_prev = txq->ift_in_use;
+		pidx_prev = txq->ift_pidx;
 		if ((err = iflib_encap(txq, mp)) == ENOBUFS) {
 			DBG_COUNTER_INC(txq_drain_encapfail);
 			/* no room - bail out */
 			break;
 		}
+
 		consumed++;
 		if (err) {
 			DBG_COUNTER_INC(txq_drain_encapfail);
@@ -3223,15 +3244,19 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 
 		txq->ift_db_pending += (txq->ift_in_use - in_use_prev);
 		desc_used += (txq->ift_in_use - in_use_prev);
-		iflib_txd_db_check(ctx, txq, !coalesce);
+		notify = (pidx_prev + mask) & ~mask;
+		notify = (pidx_prev == notify || (pidx_prev + desc_used) > notify);
+		ring = (iflib_min_tx_latency || notify || !txq->ift_coalescing);
+		iflib_txd_db_check(ctx, txq, ring);
 		ETHER_BPF_MTAP(ifp, m);
 		if (__predict_false(!(ifp->if_drv_flags & IFF_DRV_RUNNING)))
 			break;
-		if (desc_used >= TXQ_MAX_DB_CONSUMED(txq->ift_size))
+		if (desc_used >= TXQ_MAX_DB_CONSUMED(txq->ift_size)) {
+			GROUPTASK_ENQUEUE(&txq->ift_task);
 			break;
-		coalesce = ((txq->ift_in_use > TXD_NOTIFY_MASK(txq)) && !iflib_min_tx_latency);
+		}
 	}
-	iflib_txd_db_check(ctx, txq, (!coalesce || reclaimed));
+	iflib_txd_db_check(ctx, txq, (reclaimed && !ring) || err);
 	if_inc_counter(ifp, IFCOUNTER_OBYTES, bytes_sent);
 	if_inc_counter(ifp, IFCOUNTER_OPACKETS, pkt_sent);
 	if (mcast_sent)
