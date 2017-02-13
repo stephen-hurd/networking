@@ -3180,7 +3180,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 	struct mbuf **mp, *m;
 	int i, count, consumed, pkt_sent, bytes_sent, mcast_sent, avail;
 	int reclaimed, err, in_use_prev, desc_used, mask;
-	bool do_prefetch, ring;
+	bool do_prefetch, ring, coalesce;
 
 	if (__predict_false(!(if_getdrvflags(ifp) & IFF_DRV_RUNNING) ||
 			    !LINK_ACTIVE(ctx))) {
@@ -3216,7 +3216,8 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 	do_prefetch = (ctx->ifc_flags & IFC_PREFETCH);
 	mask = TXD_NOTIFY_MASK(txq);
 	ring = false;
-	for (desc_used = i = 0; i < count && TXQ_AVAIL(txq) > MAX_TX_DESC(ctx) + 2; i++) {
+	avail = TXQ_AVAIL(txq);
+	for (desc_used = i = 0; i < count && avail > MAX_TX_DESC(ctx) + 2; i++) {
 		int pidx_prev, notify, rem = do_prefetch ? count - i : 0;
 
 		mp = _ring_peek_one(r, cidx, i, rem);
@@ -3242,11 +3243,13 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		if (m->m_flags & M_MCAST)
 			mcast_sent++;
 
+		avail = TXQ_AVAIL(txq);
 		txq->ift_db_pending += (txq->ift_in_use - in_use_prev);
 		desc_used += (txq->ift_in_use - in_use_prev);
 		notify = (pidx_prev + mask) & ~mask;
 		notify = (pidx_prev == notify || (pidx_prev + desc_used) > notify);
-		ring = (iflib_min_tx_latency || notify || !txq->ift_coalescing);
+		coalesce = (txq->ift_coalescing || avail < (txq->ift_size >> 2));
+		ring = (iflib_min_tx_latency || notify || !coalesce);
 		iflib_txd_db_check(ctx, txq, ring);
 		ETHER_BPF_MTAP(ifp, m);
 		if (__predict_false(!(ifp->if_drv_flags & IFF_DRV_RUNNING)))
