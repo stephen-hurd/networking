@@ -451,6 +451,13 @@ struct iflib_rxq {
 #endif
 }  __aligned(CACHE_LINE_SIZE);
 
+typedef struct if_rxsd {
+	caddr_t *ifsd_cl;
+	struct mbuf **ifsd_m;
+	iflib_fl_t ifsd_fl;
+	qidx_t ifsd_cidx;
+} *if_rxsd_t;
+
 /* multiple of word size */
 #ifdef __LP64__
 #define PKT_INFO_SIZE	6
@@ -2210,7 +2217,7 @@ prefetch_pkts(iflib_fl_t fl, int cidx)
 }
 
 static void
-rxd_frag_to_sd(iflib_rxq_t rxq, if_rxd_frag_t irf, int *cltype, int unload, iflib_fl_t *pfl, int *pcidx)
+rxd_frag_to_sd(iflib_rxq_t rxq, if_rxd_frag_t irf, int unload, if_rxsd_t sd)
 {
 	int flid, cidx;
 	bus_dmamap_t map;
@@ -2221,11 +2228,13 @@ rxd_frag_to_sd(iflib_rxq_t rxq, if_rxd_frag_t irf, int *cltype, int unload, ifli
 	flid = irf->irf_flid;
 	cidx = irf->irf_idx;
 	fl = &rxq->ifr_fl[flid];
+	sd->ifsd_fl = fl;
+	sd->ifsd_cidx = cidx;
+	sd->ifsd_m = &fl->ifl_sds.ifsd_m[cidx];
+	sd->ifsd_cl = &fl->ifl_sds.ifsd_cl[cidx];
 	fl->ifl_credits--;
 #if MEMORY_LOGGING
 	fl->ifl_m_dequeued++;
-	if (cltype)
-		fl->ifl_cl_dequeued++;
 #endif
 	if (rxq->ifr_ctx->ifc_flags & IFC_PREFETCH)
 		prefetch_pkts(fl, cidx);
@@ -2248,41 +2257,33 @@ rxd_frag_to_sd(iflib_rxq_t rxq, if_rxd_frag_t irf, int *cltype, int unload, ifli
 		fl->ifl_cidx = 0;
 		fl->ifl_gen = 0;
 	}
-	/* YES ick */
-	if (cltype)
-		*cltype = fl->ifl_cltype;
-	*pfl = fl;
-	*pcidx = cidx;
 }
 
 static struct mbuf *
-assemble_segments(iflib_rxq_t rxq, if_rxd_info_t ri)
+assemble_segments(iflib_rxq_t rxq, if_rxd_info_t ri, if_rxsd_t sd)
 {
-	int i, padlen , flags, cltype;
-	struct mbuf *m, *mh, *mt, *sd_m;
-	iflib_fl_t fl;
-	int cidx;
-	caddr_t cl, sd_cl;
+	int i, padlen , flags;
+	struct mbuf *m, *mh, *mt;
+	caddr_t cl;
 
 	i = 0;
 	mh = NULL;
 	do {
-		rxd_frag_to_sd(rxq, &ri->iri_frags[i], &cltype, TRUE, &fl, &cidx);
-		sd_m = fl->ifl_sds.ifsd_m[cidx];
-		sd_cl = fl->ifl_sds.ifsd_cl[cidx];
+		rxd_frag_to_sd(rxq, &ri->iri_frags[i], TRUE, sd);
 
-		MPASS(sd_cl != NULL);
-		MPASS(sd_m != NULL);
+		MPASS(*sd->ifsd_cl != NULL);
+		MPASS(*sd->ifsd_m != NULL);
 
 		/* Don't include zero-length frags */
 		if (ri->iri_frags[i].irf_len == 0) {
 			/* XXX we can save the cluster here, but not the mbuf */
-			m_init(sd_m, M_NOWAIT, MT_DATA, 0);
-			m_free(sd_m);
-			fl->ifl_sds.ifsd_m[cidx] = NULL;
+			m_init(*sd->ifsd_m, M_NOWAIT, MT_DATA, 0);
+			m_free(*sd->ifsd_m);
+			*sd->ifsd_m = NULL;
 			continue;
 		}
-		m = sd_m;
+		m = *sd->ifsd_m;
+		*sd->ifsd_m = NULL;
 		if (mh == NULL) {
 			flags = M_PKTHDR|M_EXT;
 			mh = mt = m;
@@ -2294,13 +2295,12 @@ assemble_segments(iflib_rxq_t rxq, if_rxd_info_t ri)
 			/* assuming padding is only on the first fragment */
 			padlen = 0;
 		}
-		fl->ifl_sds.ifsd_m[cidx] = NULL;
-		cl = fl->ifl_sds.ifsd_cl[cidx];
-		fl->ifl_sds.ifsd_cl[cidx] = NULL;
+		cl = *sd->ifsd_cl;
+		*sd->ifsd_cl = NULL;
 
 		/* Can these two be made one ? */
 		m_init(m, M_NOWAIT, MT_DATA, flags);
-		m_cljset(m, cl, cltype);
+		m_cljset(m, cl, sd->ifsd_fl->ifl_cltype);
 		/*
 		 * These must follow m_init and m_cljset
 		 */
@@ -2318,23 +2318,20 @@ assemble_segments(iflib_rxq_t rxq, if_rxd_info_t ri)
 static struct mbuf *
 iflib_rxd_pkt_get(iflib_rxq_t rxq, if_rxd_info_t ri)
 {
+	struct if_rxsd sd;
 	struct mbuf *m;
-	iflib_fl_t fl;
-	caddr_t sd_cl;
-	int cidx;
 
 	/* should I merge this back in now that the two paths are basically duplicated? */
 	if (ri->iri_nfrags == 1 &&
 	    ri->iri_frags[0].irf_len <= IFLIB_RX_COPY_THRESH) {
-		rxd_frag_to_sd(rxq, &ri->iri_frags[0], NULL, FALSE, &fl, &cidx);
-		m = fl->ifl_sds.ifsd_m[cidx];
-		fl->ifl_sds.ifsd_m[cidx] = NULL;
-		sd_cl = fl->ifl_sds.ifsd_cl[cidx];
+		rxd_frag_to_sd(rxq, &ri->iri_frags[0], FALSE, &sd);
+		m = *sd.ifsd_m;
+		*sd.ifsd_m = NULL;
 		m_init(m, M_NOWAIT, MT_DATA, M_PKTHDR);
-		memcpy(m->m_data, sd_cl, ri->iri_len);
+		memcpy(m->m_data, *sd.ifsd_cl, ri->iri_len);
 		m->m_len = ri->iri_frags[0].irf_len;
        } else {
-		m = assemble_segments(rxq, ri);
+		m = assemble_segments(rxq, ri, &sd);
 	}
 	m->m_pkthdr.len = ri->iri_len;
 	m->m_pkthdr.rcvif = ri->iri_ifp;
