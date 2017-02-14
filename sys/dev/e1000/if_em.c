@@ -1838,7 +1838,7 @@ em_if_msix_intr_assign(if_ctx_t ctx, int msix)
         struct adapter     *adapter = iflib_get_softc(ctx); 
 	struct em_rx_queue *rx_que = adapter->rx_queues;
 	struct em_tx_queue *tx_que = adapter->tx_queues;
-	int		   error, rid, i, vector = 0;
+	int		   error, rid, i, vector = 0, rx_vectors;
 	char buf[16];
 
 	/* First set up ring resources */
@@ -1869,14 +1869,16 @@ em_if_msix_intr_assign(if_ctx_t ctx, int msix)
 		else
 			rx_que->eims = 1 << vector;
 	}
+	rx_vectors = vector;
 
-	for (i = 0; i < adapter->tx_num_queues; i++, tx_que++) {
+	vector = 0;
+	for (i = 0; i < adapter->tx_num_queues; i++, tx_que++, vector++) {
 		rid = vector + 1;
 		snprintf(buf, sizeof(buf), "txq%d", i);
 		tx_que = &adapter->tx_queues[i];
 		iflib_softirq_alloc_generic(ctx, rid, IFLIB_INTR_TX, tx_que, tx_que->me, buf);
 
-		tx_que->msix = vector;
+		tx_que->msix = (vector % adapter->tx_num_queues);
 
 		  /*
 		** Set the bit to enable interrupt
@@ -1884,7 +1886,7 @@ em_if_msix_intr_assign(if_ctx_t ctx, int msix)
 		** are for TX0 and TX1, note this has
 		** NOTHING to do with the MSIX vector
 		*/
-		if (adapter->hw.mac.type < igb_mac_min) {
+		if (adapter->hw.mac.type == e1000_82574) {
 			tx_que->eims = 1 << (22 + i);
 			adapter->ims |= tx_que->eims;
 			adapter->ivars |= (8 | tx_que->msix) << (8 + (i * 4));
@@ -1895,16 +1897,16 @@ em_if_msix_intr_assign(if_ctx_t ctx, int msix)
 	}
        
 	/* Link interrupt */
-	rid = vector + 1;
+	rid = rx_vectors + 1;
         error = iflib_irq_alloc_generic(ctx, &adapter->irq, rid, IFLIB_INTR_ADMIN, em_msix_link, adapter, 0, "aq");
 
 	if (error) {
 		device_printf(iflib_get_dev(ctx), "Failed to register admin handler");
 		goto fail;
 	}
-	adapter->linkvec = vector;
+	adapter->linkvec = rx_vectors;
 	if (adapter->hw.mac.type < igb_mac_min) {
-		adapter->ivars |=  (8 | vector) << 16;
+		adapter->ivars |=  (8 | rx_vectors) << 16;
 		adapter->ivars |= 0x80000000;
 	}
 	return (0);
