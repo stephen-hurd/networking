@@ -2130,35 +2130,35 @@ dev/ixgbe/if_ix.c		optional ix inet \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe -DSMP"
 dev/ixgbe/if_ixv.c		optional ixv inet \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe -DSMP"
-dev/ixgbe/ix_txrx.c		optional ix inet | ixv inet \
+dev/ixgbe/ix_txrx.c		optional ix inet !disable_modern_ether_api | ixv inet !disable_modern_ether_api \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe"
-dev/ixgbe/ixgbe_osdep.c		optional ix inet | ixv inet \
+dev/ixgbe/ixgbe_osdep.c		optional ix inet !disable_modern_ether_api | ixv inet !disable_modern_ether_api \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe"
-dev/ixgbe/ixgbe_sysctl.c	optional ix inet | ixv inet \
+dev/ixgbe/ixgbe_sysctl.c	optional ix inet !disable_modern_ether_api | ixv inet !disable_modern_ether_api \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe"
-dev/ixgbe/ixgbe_phy.c		optional ix inet | ixv inet \
+dev/ixgbe/ixgbe_phy.c		optional ix inet !disable_modern_ether_api | ixv inet !disable_modern_ether_api \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe"
-dev/ixgbe/ixgbe_api.c		optional ix inet | ixv inet \
+dev/ixgbe/ixgbe_api.c		optional ix inet !disable_modern_ether_api | ixv inet !disable_modern_ether_api \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe"
-dev/ixgbe/ixgbe_common.c	optional ix inet | ixv inet \
+dev/ixgbe/ixgbe_common.c	optional ix inet !disable_modern_ether_api | ixv inet !disable_modern_ether_api \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe"
-dev/ixgbe/ixgbe_mbx.c		optional ix inet | ixv inet \
+dev/ixgbe/ixgbe_mbx.c		optional ix inet !disable_modern_ether_api | ixv inet !disable_modern_ether_api \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe"
-dev/ixgbe/ixgbe_vf.c		optional ix inet | ixv inet \
+dev/ixgbe/ixgbe_vf.c		optional ix inet !disable_modern_ether_api | ixv inet !disable_modern_ether_api \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe"
-dev/ixgbe/ixgbe_82598.c		optional ix inet | ixv inet \
+dev/ixgbe/ixgbe_82598.c		optional ix inet !disable_modern_ether_api | ixv inet !disable_modern_ether_api \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe"
-dev/ixgbe/ixgbe_82599.c		optional ix inet | ixv inet \
+dev/ixgbe/ixgbe_82599.c		optional ix inet !disable_modern_ether_api | ixv inet !disable_modern_ether_api \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe"
-dev/ixgbe/ixgbe_x540.c		optional ix inet | ixv inet \
+dev/ixgbe/ixgbe_x540.c		optional ix inet !disable_modern_ether_api | ixv inet !disable_modern_ether_api \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe"
-dev/ixgbe/ixgbe_x550.c		optional ix inet | ixv inet \
+dev/ixgbe/ixgbe_x550.c		optional ix inet !disable_modern_ether_api | ixv inet !disable_modern_ether_api \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe"
-dev/ixgbe/ixgbe_dcb.c		optional ix inet | ixv inet \
+dev/ixgbe/ixgbe_dcb.c		optional ix inet !disable_modern_ether_api | ixv inet !disable_modern_ether_api \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe"
-dev/ixgbe/ixgbe_dcb_82598.c	optional ix inet | ixv inet \
+dev/ixgbe/ixgbe_dcb_82598.c	optional ix inet !disable_modern_ether_api | ixv inet !disable_modern_ether_api \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe"
-dev/ixgbe/ixgbe_dcb_82599.c	optional ix inet | ixv inet \
+dev/ixgbe/ixgbe_dcb_82599.c	optional ix inet !disable_modern_ether_api | ixv inet !disable_modern_ether_api \
 	compile-with "${NORMAL_C} -I$S/dev/ixgbe"
 dev/jedec_ts/jedec_ts.c		optional jedec_ts smbus
 dev/jme/if_jme.c		optional jme pci
