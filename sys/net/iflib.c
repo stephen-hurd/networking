@@ -3244,6 +3244,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		if (__predict_false(*mp == (struct mbuf *)txq)) {
 			consumed++;
 			iflib_txd_db_check(ctx, txq, true);
+			continue;
 		}
 		in_use_prev = txq->ift_in_use;
 		pidx_prev = txq->ift_pidx;
