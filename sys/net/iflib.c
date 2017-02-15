@@ -2019,14 +2019,14 @@ iflib_timer(void *arg)
 	 * when we're consuming fewer than 4k descriptors per descriptors
 	 * per second. 
 	 */
-	txq->ift_coalescing = (txq->ift_processed - txq->ift_processed_last > IFLIB_MIN_DESC_SEC/2);
+	txq->ift_coalescing = (txq->ift_processed - txq->ift_processed_last > IFLIB_MIN_DESC_SEC/4);
 	txq->ift_processed_last = txq->ift_processed;
 	/* handle any laggards */
 	GROUPTASK_ENQUEUE(&txq->ift_task);
 
 	ctx->ifc_pause_frames = 0;
 	if (if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING) 
-		callout_reset_on(&txq->ift_timer, hz/2, iflib_timer, txq, txq->ift_timer.c_cpu);
+		callout_reset_on(&txq->ift_timer, hz/4, iflib_timer, txq, txq->ift_timer.c_cpu);
 	return;
 hung:
 	CTX_LOCK(ctx);
@@ -3184,7 +3184,6 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		DBG_COUNTER_INC(txq_drain_notready);
 		return (0);
 	}
-
 	avail = IDXDIFF(pidx, cidx, r->size);
 	if (__predict_false(ctx->ifc_flags & IFC_QFLUSH)) {
 		DBG_COUNTER_INC(txq_drain_flushing);
@@ -3195,6 +3194,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		return (avail);
 	}
 	reclaimed = iflib_completed_tx_reclaim(txq, RECLAIM_THRESH(ctx));
+	iflib_txd_db_check(ctx, txq, !txq->ift_coalescing || reclaimed);
 	if (__predict_false(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_OACTIVE)) {
 		txq->ift_qstatus = IFLIB_QUEUE_IDLE;
 		CALLOUT_LOCK(txq);
@@ -3245,7 +3245,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		desc_used += (txq->ift_in_use - in_use_prev);
 		notify = (pidx_prev + mask) & ~mask;
 		notify = (pidx_prev == notify || (pidx_prev + desc_used) > notify);
-		coalesce = (txq->ift_coalescing || avail < (txq->ift_size >> 2));
+		coalesce = (txq->ift_coalescing || avail < (txq->ift_size >> 1));
 		ring = (iflib_min_tx_latency || notify || !coalesce);
 		iflib_txd_db_check(ctx, txq, ring);
 		ETHER_BPF_MTAP(ifp, m);
