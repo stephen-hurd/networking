@@ -3184,6 +3184,10 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		DBG_COUNTER_INC(txq_drain_notready);
 		return (0);
 	}
+	reclaimed = iflib_completed_tx_reclaim(txq, RECLAIM_THRESH(ctx));
+	iflib_txd_db_check(ctx, txq, !txq->ift_coalescing || reclaimed);
+	if (__predict_false(cidx == pidx))
+		return (0);
 	avail = IDXDIFF(pidx, cidx, r->size);
 	if (__predict_false(ctx->ifc_flags & IFC_QFLUSH)) {
 		DBG_COUNTER_INC(txq_drain_flushing);
@@ -3193,8 +3197,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		}
 		return (avail);
 	}
-	reclaimed = iflib_completed_tx_reclaim(txq, RECLAIM_THRESH(ctx));
-	iflib_txd_db_check(ctx, txq, !txq->ift_coalescing || reclaimed);
+
 	if (__predict_false(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_OACTIVE)) {
 		txq->ift_qstatus = IFLIB_QUEUE_IDLE;
 		CALLOUT_LOCK(txq);
