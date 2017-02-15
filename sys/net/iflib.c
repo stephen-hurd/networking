@@ -94,6 +94,13 @@ __FBSDID("$FreeBSD: head/sys/net/iflib.c 302439 2016-07-08 17:04:21Z cem $");
 #endif
 
 /*
+ * Raise coalesce threshold
+ * Re-enable tx interrupts
+ * do a gratuitous ARP every timer interrupt
+ */
+
+
+/*
  * enable accounting of every mbuf as it comes in to and goes out of
  * iflib's software descriptor references
  */
@@ -140,7 +147,7 @@ typedef struct iflib_filter_info {
 	driver_filter_t *ifi_filter;
 	void *ifi_filter_arg;
 	struct grouptask *ifi_task;
-	struct iflib_ctx *ifi_ctx;
+	void *ifi_ctx;
 } *iflib_filter_info_t;
 
 struct iflib_ctx {
@@ -318,7 +325,6 @@ struct iflib_txq {
 	qidx_t		ift_pidx;
 	uint8_t		ift_gen;
 	uint8_t		ift_db_pending;
-	uint8_t		ift_db_pending_queued;
 	uint8_t		ift_npending;
 	uint8_t		ift_br_offset;
 	/* implicit pad */
@@ -568,9 +574,11 @@ static SYSCTL_NODE(_net, OID_AUTO, iflib, CTLFLAG_RD, 0,
  * XXX need to ensure that this can't accidentally cause the head to be moved backwards 
  */
 static int iflib_min_tx_latency = 0;
-
 SYSCTL_INT(_net_iflib, OID_AUTO, min_tx_latency, CTLFLAG_RW,
 		   &iflib_min_tx_latency, 0, "minimize transmit latency at the possible expense of throughput");
+static int iflib_no_tx_batch = 0;
+SYSCTL_INT(_net_iflib, OID_AUTO, no_tx_batch, CTLFLAG_RW,
+		   &iflib_no_tx_batch, 0, "minimize transmit latency at the possible expense of throughput");
 
 
 #if IFLIB_DEBUG_COUNTERS
@@ -1344,6 +1352,9 @@ iflib_fast_intr(void *arg)
 {
 	iflib_filter_info_t info = arg;
 	struct grouptask *gtask = info->ifi_task;
+	iflib_rxq_t rxq = (iflib_rxq_t)info->ifi_ctx;
+	if_ctx_t ctx;
+	int i;
 
 	if (!iflib_started)
 		return (FILTER_HANDLED);
@@ -1352,6 +1363,15 @@ iflib_fast_intr(void *arg)
 	if (info->ifi_filter != NULL && info->ifi_filter(info->ifi_filter_arg) == FILTER_HANDLED)
 		return (FILTER_HANDLED);
 
+	for (i = 0; i < rxq->ifr_ntxqirq; i++) {
+		qidx_t txqid = rxq->ifr_txqid[i];
+
+		ctx = rxq->ifr_ctx;
+
+		if (!ctx->isc_txd_credits_update(ctx->ifc_softc, txqid, false))
+			continue;
+		GROUPTASK_ENQUEUE(&ctx->ifc_txqs[txqid].ift_task);
+	}
 	GROUPTASK_ENQUEUE(gtask);
 	return (FILTER_HANDLED);
 }
@@ -2022,7 +2042,8 @@ iflib_timer(void *arg)
 	txq->ift_coalescing = (txq->ift_processed - txq->ift_processed_last > IFLIB_MIN_DESC_SEC/4);
 	txq->ift_processed_last = txq->ift_processed;
 	/* handle any laggards */
-	GROUPTASK_ENQUEUE(&txq->ift_task);
+	if (txq->ift_db_pending)
+		GROUPTASK_ENQUEUE(&txq->ift_task);
 
 	ctx->ifc_pause_frames = 0;
 	if (if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING) 
@@ -2974,7 +2995,7 @@ defrag:
 	 * However, this also means that the driver will need to keep track
 	 * of the descriptors that RS was set on to check them for the DD bit.
 	 */
-	if (pidx == notify || pidx + nsegs > notify)
+	if (pidx == notify || pidx + nsegs > notify || iflib_no_tx_batch)
 		pi.ipi_flags |= IPI_TX_INTR;
 
 	pi.ipi_segs = segs;
@@ -3186,8 +3207,6 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 	}
 	reclaimed = iflib_completed_tx_reclaim(txq, RECLAIM_THRESH(ctx));
 	iflib_txd_db_check(ctx, txq, !txq->ift_coalescing || reclaimed);
-	if (__predict_false(cidx == pidx))
-		return (0);
 	avail = IDXDIFF(pidx, cidx, r->size);
 	if (__predict_false(ctx->ifc_flags & IFC_QFLUSH)) {
 		DBG_COUNTER_INC(txq_drain_flushing);
@@ -3222,6 +3241,10 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 
 		mp = _ring_peek_one(r, cidx, i, rem);
 		MPASS(mp != NULL && *mp != NULL);
+		if (__predict_false(*mp == (struct mbuf *)txq)) {
+			consumed++;
+			iflib_txd_db_check(ctx, txq, true);
+		}
 		in_use_prev = txq->ift_in_use;
 		pidx_prev = txq->ift_pidx;
 		if ((err = iflib_encap(txq, mp)) == ENOBUFS) {
@@ -3248,7 +3271,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		desc_used += (txq->ift_in_use - in_use_prev);
 		notify = (pidx_prev + mask) & ~mask;
 		notify = (pidx_prev == notify || (pidx_prev + desc_used) > notify);
-		coalesce = (txq->ift_coalescing || avail < (txq->ift_size >> 1));
+		coalesce = (txq->ift_coalescing || avail < (txq->ift_size >> 2));
 		ring = (iflib_min_tx_latency || notify || !coalesce);
 		iflib_txd_db_check(ctx, txq, ring);
 		ETHER_BPF_MTAP(ifp, m);
@@ -3294,6 +3317,8 @@ iflib_txq_drain_free(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 	avail = IDXDIFF(pidx, cidx, r->size);
 	for (i = 0; i < avail; i++) {
 		mp = _ring_peek_one(r, cidx, i, avail - i);
+		if (__predict_false(*mp == (struct mbuf *)txq))
+			continue;
 		m_freem(*mp);
 	}
 	MPASS(ifmp_ring_is_stalled(r) == 0);
@@ -3321,6 +3346,7 @@ _task_fn_tx(void *context)
 	iflib_txq_t txq = context;
 	if_ctx_t ctx = txq->ift_ctx;
 	struct ifnet *ifp = ctx->ifc_ifp;
+	int rc;
 
 #ifdef IFLIB_DIAGNOSTICS
 	txq->ift_cpu_exec_count[curcpu]++;
@@ -3328,10 +3354,20 @@ _task_fn_tx(void *context)
 	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
 		return;
 	if ((ifp->if_capenable & IFCAP_NETMAP)) {
-		netmap_tx_irq(ifp, txq->ift_id);
+		if (ctx->isc_txd_credits_update(ctx->ifc_softc, txq->ift_id, false))
+			netmap_tx_irq(ifp, txq->ift_id);
 		return;
 	}
-	ifmp_ring_check_drainage(txq->ift_br, TX_BATCH_SIZE);
+	if (txq->ift_db_pending)
+		ifmp_ring_enqueue(txq->ift_br, (void **)&txq, 1, TX_BATCH_SIZE);
+	else
+		ifmp_ring_check_drainage(txq->ift_br, TX_BATCH_SIZE);
+	if (ctx->ifc_flags & IFC_LEGACY)
+		IFDI_INTR_ENABLE(ctx);
+	else {
+		rc = IFDI_TX_QUEUE_INTR_ENABLE(ctx, txq->ift_id);
+		KASSERT(rc != ENOTSUP, ("MSI-X support requires queue_intr_enable, but not implemented in driver"));
+	}
 }
 
 static void
@@ -3339,9 +3375,8 @@ _task_fn_rx(void *context)
 {
 	iflib_rxq_t rxq = context;
 	if_ctx_t ctx = rxq->ifr_ctx;
-	struct ifnet *ifp = ctx->ifc_ifp;
 	bool more;
-	int i, rc;
+	int rc;
 
 #ifdef IFLIB_DIAGNOSTICS
 	rxq->ifr_cpu_exec_count[curcpu]++;
@@ -3349,22 +3384,12 @@ _task_fn_rx(void *context)
 	DBG_COUNTER_INC(task_fn_rxs);
 	if (__predict_false(!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)))
 		return;
-	for (i = 0; i < rxq->ifr_ntxqirq; i++) {
-		qidx_t txqid = rxq->ifr_txqid[i];
-
-		if (!ctx->isc_txd_credits_update(ctx->ifc_softc, txqid, false))
-			continue;
-		if (ifp->if_capenable & IFCAP_NETMAP)
-			netmap_tx_irq(ifp, txqid);
-		else
-			GROUPTASK_ENQUEUE(&ctx->ifc_txqs[txqid].ift_task);
-	}
 	if ((more = iflib_rxeof(rxq, 16 /* XXX */)) == false) {
 		if (ctx->ifc_flags & IFC_LEGACY)
 			IFDI_INTR_ENABLE(ctx);
 		else {
 			DBG_COUNTER_INC(rx_intr_enables);
-			rc = IFDI_QUEUE_INTR_ENABLE(ctx, rxq->ifr_id);
+			rc = IFDI_RX_QUEUE_INTR_ENABLE(ctx, rxq->ifr_id);
 			KASSERT(rc != ENOTSUP, ("MSI-X support requires queue_intr_enable, but not implemented in driver"));
 		}
 	}
@@ -4770,7 +4795,7 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 	info->ifi_filter = filter;
 	info->ifi_filter_arg = filter_arg;
 	info->ifi_task = gtask;
-	info->ifi_ctx = ctx;
+	info->ifi_ctx = q;
 
 	err = _iflib_irq_alloc(ctx, irq, rid, iflib_fast_intr, NULL, info,  name);
 	if (err != 0) {

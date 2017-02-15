@@ -253,7 +253,8 @@ static device_method_t bnxt_iflib_methods[] = {
 	DEVMETHOD(ifdi_update_admin_status, bnxt_update_admin_status),
 
 	DEVMETHOD(ifdi_intr_enable, bnxt_intr_enable),
-	DEVMETHOD(ifdi_queue_intr_enable, bnxt_queue_intr_enable),
+	DEVMETHOD(ifdi_tx_queue_intr_enable, bnxt_queue_intr_enable),
+	DEVMETHOD(ifdi_rx_queue_intr_enable, bnxt_queue_intr_enable),
 	DEVMETHOD(ifdi_intr_disable, bnxt_disable_intr),
 	DEVMETHOD(ifdi_msix_intr_assign, bnxt_msix_intr_assign),
 

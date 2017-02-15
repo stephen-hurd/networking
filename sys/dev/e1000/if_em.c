@@ -252,7 +252,8 @@ static void	em_initialize_receive_unit(if_ctx_t ctx);
 
 static void	em_if_enable_intr(if_ctx_t ctx); 
 static void	em_if_disable_intr(if_ctx_t ctx);
-static int      em_if_queue_intr_enable(if_ctx_t ctx, uint16_t rxqid);
+static int      em_if_rx_queue_intr_enable(if_ctx_t ctx, uint16_t rxqid);
+static int      em_if_tx_queue_intr_enable(if_ctx_t ctx, uint16_t txqid);
 static void     em_if_multi_set(if_ctx_t ctx);
 static void     em_if_update_admin_status(if_ctx_t ctx);
 static void	em_update_stats_counters(struct adapter *);
@@ -376,7 +377,8 @@ static device_method_t em_if_methods[] = {
 	DEVMETHOD(ifdi_vlan_unregister, em_if_vlan_unregister),
 	DEVMETHOD(ifdi_get_counter, em_if_get_counter),
 	DEVMETHOD(ifdi_led_func, em_if_led_func),
-	DEVMETHOD(ifdi_queue_intr_enable, em_if_queue_intr_enable),
+	DEVMETHOD(ifdi_rx_queue_intr_enable, em_if_rx_queue_intr_enable),
+	DEVMETHOD(ifdi_tx_queue_intr_enable, em_if_tx_queue_intr_enable),
 	DEVMETHOD_END
 };
 
@@ -1304,27 +1306,52 @@ skip_stray:
 }
 
 static void
-igb_enable_queue(struct adapter *adapter, struct em_rx_queue *rxq)
+igb_rx_enable_queue(struct adapter *adapter, struct em_rx_queue *rxq)
 {
 	E1000_WRITE_REG(&adapter->hw, E1000_EIMS, rxq->eims);
 }
 
 static void
-em_enable_queue(struct adapter *adapter, struct em_rx_queue *rxq)
+em_rx_enable_queue(struct adapter *adapter, struct em_rx_queue *rxq)
 {
 	E1000_WRITE_REG(&adapter->hw, E1000_IMS, rxq->eims);
 }
 
+static void
+igb_tx_enable_queue(struct adapter *adapter, struct em_tx_queue *txq)
+{
+	E1000_WRITE_REG(&adapter->hw, E1000_EIMS, txq->eims);
+}
+
+static void
+em_tx_enable_queue(struct adapter *adapter, struct em_tx_queue *txq)
+{
+	E1000_WRITE_REG(&adapter->hw, E1000_IMS, txq->eims);
+}
+
 static int
-em_if_queue_intr_enable(if_ctx_t ctx, uint16_t rxqid)
+em_if_rx_queue_intr_enable(if_ctx_t ctx, uint16_t rxqid)
 {
         struct adapter	*adapter = iflib_get_softc(ctx);
 	struct em_rx_queue *rxq = &adapter->rx_queues[rxqid];
 	
 	if (adapter->hw.mac.type >= igb_mac_min)
-		igb_enable_queue(adapter, rxq);
+		igb_rx_enable_queue(adapter, rxq);
 	else
-		em_enable_queue(adapter, rxq);
+		em_rx_enable_queue(adapter, rxq);
+	return (0);
+}
+
+static int
+em_if_tx_queue_intr_enable(if_ctx_t ctx, uint16_t txqid)
+{
+        struct adapter	*adapter = iflib_get_softc(ctx);
+	struct em_tx_queue *txq = &adapter->tx_queues[txqid];
+
+	if (adapter->hw.mac.type >= igb_mac_min)
+		igb_tx_enable_queue(adapter, txq);
+	else
+		em_tx_enable_queue(adapter, txq);
 	return (0);
 }
 

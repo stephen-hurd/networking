@@ -195,7 +195,12 @@ METHOD void intr_disable {
 	if_ctx_t _ctx;
 };
 
-METHOD int queue_intr_enable {
+METHOD int rx_queue_intr_enable {
+	if_ctx_t _ctx;
+	uint16_t _qid;
+} DEFAULT null_queue_intr_enable;
+
+METHOD int tx_queue_intr_enable {
 	if_ctx_t _ctx;
 	uint16_t _qid;
 } DEFAULT null_queue_intr_enable;

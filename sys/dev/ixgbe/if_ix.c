@@ -116,7 +116,8 @@ static void ixgbe_if_stop(if_ctx_t ctx);
 static void ixgbe_if_init(if_ctx_t ctx);
 void ixgbe_if_enable_intr(if_ctx_t ctx);
 static void ixgbe_if_disable_intr(if_ctx_t ctx);
-static int ixgbe_if_queue_intr_enable(if_ctx_t ctx, uint16_t qid);
+static int ixgbe_if_rx_queue_intr_enable(if_ctx_t ctx, uint16_t qid);
+static int ixgbe_if_tx_queue_intr_enable(if_ctx_t ctx, uint16_t qid);
 static void ixgbe_if_media_status(if_ctx_t ctx, struct ifmediareq * ifmr);
 static int ixgbe_if_media_change(if_ctx_t ctx);
 static int ixgbe_if_msix_intr_assign(if_ctx_t, int);
@@ -270,7 +271,8 @@ static device_method_t ixgbe_if_methods[] = {
 	DEVMETHOD(ifdi_msix_intr_assign, ixgbe_if_msix_intr_assign),
 	DEVMETHOD(ifdi_intr_enable, ixgbe_if_enable_intr),
 	DEVMETHOD(ifdi_intr_disable, ixgbe_if_disable_intr),
-	DEVMETHOD(ifdi_queue_intr_enable, ixgbe_if_queue_intr_enable),
+	DEVMETHOD(ifdi_rx_queue_intr_enable, ixgbe_if_rx_queue_intr_enable),
+	DEVMETHOD(ifdi_tx_queue_intr_enable, ixgbe_if_tx_queue_intr_enable),
 	DEVMETHOD(ifdi_tx_queues_alloc, ixgbe_if_tx_queues_alloc),
 	DEVMETHOD(ifdi_rx_queues_alloc, ixgbe_if_rx_queues_alloc),
 	DEVMETHOD(ifdi_queues_free, ixgbe_if_queues_free),
@@ -3864,7 +3866,7 @@ ixgbe_if_disable_intr(if_ctx_t ctx)
 
 
 static int
-ixgbe_if_queue_intr_enable(if_ctx_t ctx, uint16_t rxqid)
+ixgbe_if_rx_queue_intr_enable(if_ctx_t ctx, uint16_t rxqid)
 {
 	struct adapter	*adapter = iflib_get_softc(ctx);
 	struct ix_rx_queue *que = &adapter->rx_queues[rxqid];
@@ -3872,7 +3874,17 @@ ixgbe_if_queue_intr_enable(if_ctx_t ctx, uint16_t rxqid)
 	ixgbe_enable_queue(adapter, que->rxr.me);
 	return (0);
 }
- 
+
+static int
+ixgbe_if_tx_queue_intr_enable(if_ctx_t ctx, uint16_t txqid)
+{
+	struct adapter	*adapter = iflib_get_softc(ctx);
+	struct ix_tx_queue *que = &adapter->tx_queues[txqid];
+
+	ixgbe_enable_queue(adapter, que->txr.me);
+	return (0);
+}
+
 /*
 **
 ** MSIX Interrupt Handlers and Tasklets
