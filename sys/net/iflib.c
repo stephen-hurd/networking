@@ -286,7 +286,7 @@ typedef struct iflib_sw_tx_desc_array {
 #define IFLIB_RX_COPY_THRESH		128
 #define IFLIB_MAX_RX_REFRESH		32
 /* The minimum descriptors per second before we start coalescing */
-#define IFLIB_MIN_DESC_SEC		4096
+#define IFLIB_MIN_DESC_SEC		16384
 #define IFLIB_DEFAULT_TX_UPDATE_FREQ	8
 #define IFLIB_QUEUE_IDLE		0
 #define IFLIB_QUEUE_HUNG		1
