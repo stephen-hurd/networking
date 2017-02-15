@@ -90,23 +90,15 @@ struct if_txrx lem_txrx  = {
 
 extern if_shared_ctx_t em_sctx; 
 
-int
-em_get_rs(SYSCTL_HANDLER_ARGS)
+void
+em_dump_rs(struct adapter *adapter)
 {
-	struct adapter *adapter = (struct adapter *)arg1;
 	if_softc_ctx_t scctx = adapter->shared;
 	struct em_tx_queue *que;
 	struct tx_ring *txr;
 	qidx_t i, rs_cidx, ntxd, qid, cur;
 	uint8_t status;
-	int error;
-	int result;
 
-	result = -1;
-	error = sysctl_handle_int(oidp, &result, 0, req);
-
-	if (error || !req->newptr || result != 1)
-		return (error);
 	ntxd = scctx->isc_ntxd[0];
 	for (qid = 0; qid < adapter->tx_num_queues; qid++) {
 		que = &adapter->tx_queues[qid];
@@ -122,7 +114,6 @@ em_get_rs(SYSCTL_HANDLER_ARGS)
 		}
 	}
 	printf("\n");
-	return (0);
 }
 
 /**********************************************************************

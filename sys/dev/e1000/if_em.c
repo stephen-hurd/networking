@@ -256,6 +256,7 @@ static int      em_if_rx_queue_intr_enable(if_ctx_t ctx, uint16_t rxqid);
 static int      em_if_tx_queue_intr_enable(if_ctx_t ctx, uint16_t txqid);
 static void     em_if_multi_set(if_ctx_t ctx);
 static void     em_if_update_admin_status(if_ctx_t ctx);
+static void     em_if_debug(if_ctx_t ctx);
 static void	em_update_stats_counters(struct adapter *);
 static void	em_add_hw_stats(struct adapter *adapter);
 static int	em_if_set_promisc(if_ctx_t ctx, int flags); 
@@ -263,6 +264,7 @@ static void	em_setup_vlan_hw_support(struct adapter *);
 static int	em_sysctl_nvm_info(SYSCTL_HANDLER_ARGS);
 static void	em_print_nvm_info(struct adapter *);
 static int	em_sysctl_debug_info(SYSCTL_HANDLER_ARGS);
+static int	em_get_rs(SYSCTL_HANDLER_ARGS);
 static void	em_print_debug_info(struct adapter *);
 static int 	em_is_valid_ether_addr(u8 *);
 static int	em_sysctl_int_delay(SYSCTL_HANDLER_ARGS);
@@ -379,6 +381,7 @@ static device_method_t em_if_methods[] = {
 	DEVMETHOD(ifdi_led_func, em_if_led_func),
 	DEVMETHOD(ifdi_rx_queue_intr_enable, em_if_rx_queue_intr_enable),
 	DEVMETHOD(ifdi_tx_queue_intr_enable, em_if_tx_queue_intr_enable),
+	DEVMETHOD(ifdi_debug, em_if_debug),
 	DEVMETHOD_END
 };
 
@@ -4228,6 +4231,29 @@ em_sysctl_debug_info(SYSCTL_HANDLER_ARGS)
         }
 
 	return (error);
+}
+
+static int
+em_get_rs(SYSCTL_HANDLER_ARGS)
+{
+	struct adapter *adapter = (struct adapter *)arg1;
+	int error;
+	int result;
+
+	result = -1;
+	error = sysctl_handle_int(oidp, &result, 0, req);
+
+	if (error || !req->newptr || result != 1)
+		return (error);
+	em_dump_rs(adapter);
+
+	return (0);
+}
+
+static void
+em_if_debug(if_ctx_t ctx)
+{
+	em_dump_rs(iflib_get_softc(ctx));
 }
 
 /*
