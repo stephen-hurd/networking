@@ -2021,6 +2021,7 @@ iflib_timer(void *arg)
 {
 	iflib_txq_t txq = arg;
 	if_ctx_t ctx = txq->ift_ctx;
+	bool coalesce;
 
 	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
 		return;
@@ -2039,7 +2040,12 @@ iflib_timer(void *arg)
 	 * when we're consuming fewer than 4k descriptors per descriptors
 	 * per second. 
 	 */
-	txq->ift_coalescing = (txq->ift_processed - txq->ift_processed_last > IFLIB_MIN_DESC_SEC/4);
+	coalesce = (txq->ift_processed - txq->ift_processed_last > IFLIB_MIN_DESC_SEC/2);
+#ifdef INVARIANTS
+	if (txq->ift_coalescing != coalesce)
+		IFDI_DEBUG(ctx);
+#endif
+	txq->ift_coalescing = coalesce;
 	txq->ift_processed_last = txq->ift_processed;
 	/* handle any laggards */
 	if (txq->ift_db_pending)
@@ -2047,7 +2053,7 @@ iflib_timer(void *arg)
 
 	ctx->ifc_pause_frames = 0;
 	if (if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING) 
-		callout_reset_on(&txq->ift_timer, hz/4, iflib_timer, txq, txq->ift_timer.c_cpu);
+		callout_reset_on(&txq->ift_timer, hz/2, iflib_timer, txq, txq->ift_timer.c_cpu);
 	return;
 hung:
 	CTX_LOCK(ctx);
