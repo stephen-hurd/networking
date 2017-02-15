@@ -338,4 +338,6 @@ METHOD int sysctl_int_delay {
 	if_int_delay_info_t _iidi;
 } DEFAULT null_sysctl_int_delay;
 
-
+METHOD void debug {
+	if_ctx_t _ctx;
+} DEFAULT null_void_op;
