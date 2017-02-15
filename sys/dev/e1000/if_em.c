@@ -747,8 +747,8 @@ em_if_attach_pre(if_ctx_t ctx)
 
 	SYSCTL_ADD_PROC(device_get_sysctl_ctx(dev),
 	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)),
-	    OID_AUTO, "reg_dump", CTLTYPE_STRING | CTLFLAG_RD, adapter, 0,
-	    em_get_rs, "A", "Dump Registers");
+	    OID_AUTO, "rs_dump", CTLTYPE_INT | CTLFLAG_RW, adapter, 0,
+	    em_get_rs, "I", "Dump RS indexes");
 	/* Determine hardware and mac info */
 	em_identify_hardware(ctx);
 
