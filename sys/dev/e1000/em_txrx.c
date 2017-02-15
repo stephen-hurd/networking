@@ -90,6 +90,41 @@ struct if_txrx lem_txrx  = {
 
 extern if_shared_ctx_t em_sctx; 
 
+int
+em_get_rs(SYSCTL_HANDLER_ARGS)
+{
+	struct adapter *adapter = (struct adapter *)arg1;
+	if_softc_ctx_t scctx = adapter->shared;
+	struct em_tx_queue *que;
+	struct tx_ring *txr;
+	qidx_t i, rs_cidx, ntxd, qid, cur;
+	uint8_t status;
+	int error;
+	int result;
+
+	result = -1;
+	error = sysctl_handle_int(oidp, &result, 0, req);
+
+	if (error || !req->newptr || result != 1)
+		return (error);
+	ntxd = scctx->isc_ntxd[0];
+	for (qid = 0; qid < adapter->tx_num_queues; qid++) {
+		que = &adapter->tx_queues[qid];
+		txr =  &que->txr;
+		rs_cidx = txr->tx_rs_cidx;
+		cur = txr->tx_rsq[rs_cidx];
+		status = txr->tx_base[cur].upper.fields.status;
+		if (!(status & E1000_TXD_STAT_DD))
+			printf("qid: %d rsq[%d]: %d not set ", qid, rs_cidx, cur);
+		for (i = 0; i < ntxd; i++) {
+			if (txr->tx_base[i].upper.fields.status & E1000_TXD_STAT_DD)
+				printf("%d set ", i);
+		}
+	}
+	printf("\n");
+	return (0);
+}
+
 /**********************************************************************
  *
  *  Setup work for hardware segmentation offload (TSO) on

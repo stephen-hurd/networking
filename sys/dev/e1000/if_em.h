@@ -532,6 +532,7 @@ typedef struct _em_vendor_info_t {
 	unsigned int index;
 } em_vendor_info_t;
 
+int em_get_rs(SYSCTL_HANDLER_ARGS);
 
 #define	EM_CORE_LOCK_INIT(_sc, _name) \
 	mtx_init(&(_sc)->core_mtx, _name, "EM Core Lock", MTX_DEF)
