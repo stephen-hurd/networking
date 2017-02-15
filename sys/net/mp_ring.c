@@ -41,7 +41,6 @@ __FBSDID("$FreeBSD$");
 #define NO_64BIT_ATOMICS
 #endif
 
-
 #if defined(__i386__)
 #define atomic_cmpset_acq_64 atomic_cmpset_64
 #define atomic_cmpset_rel_64 atomic_cmpset_64
@@ -477,23 +476,13 @@ ifmp_ring_check_drainage(struct ifmp_ring *r, int budget)
 	union ring_state os, ns;
 
 	os.state = r->state;
-	if (os.flags != STALLED || os.pidx_head != os.pidx_tail) {
-		if (r->can_drain(r)) {
-			ns.state = os.state;
-			ns.flags = BUSY;
-			if (!atomic_cmpset_acq_64(&r->state, os.state, ns.state))
-				return;
-			r->drain(r, 0, 0);
-			ns.flags = IDLE;
-			r->state = ns.state;
-		}
+	if (os.flags != STALLED || os.pidx_head != os.pidx_tail || r->can_drain(r) == 0)
 		return;
-	}
-	if (r->can_drain(r) == 0)
-		return;
+
 	MPASS(os.cidx != os.pidx_tail);	/* implied by STALLED */
 	ns.state = os.state;
 	ns.flags = BUSY;
+
 
 #ifdef NO_64BIT_ATOMICS
 	mtx_lock(&r->lock);
@@ -511,6 +500,7 @@ ifmp_ring_check_drainage(struct ifmp_ring *r, int budget)
 	 */
 	if (!atomic_cmpset_acq_64(&r->state, os.state, ns.state))
 		return;
+
 
 	drain_ring_lockless(r, ns, os.flags, budget);
 #endif
