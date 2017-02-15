@@ -1961,6 +1961,7 @@ file_free(struct file *file)
 	archive_string_free(&(file->basename));
 	archive_string_free(&(file->symlink));
 	archive_string_free(&(file->script));
+	archive_entry_free(file->entry);
 	free(file);
 }
 
@@ -2913,7 +2914,7 @@ compression_init_encoder_xz(struct archive *a,
 	*strm = lzma_init_data;
 #ifdef HAVE_LZMA_STREAM_ENCODER_MT
 	if (threads > 1) {
-		bzero(&mt_options, sizeof(mt_options));
+		memset(&mt_options, 0, sizeof(mt_options));
 		mt_options.threads = threads;
 		mt_options.timeout = 300;
 		mt_options.filters = lzmafilters;

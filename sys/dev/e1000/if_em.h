@@ -1,5 +1,30 @@
+/*-
+ * Copyright (c) 2016 Matt Macy <mmacy@nextbsd.org>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
 /*$FreeBSD$*/
-#include "opt_em.h"
 #include "opt_ddb.h"
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -150,11 +175,7 @@
  *            restoring the network connection. To eliminate the potential
  *            for the hang ensure that EM_RDTR is set to 0.
  */
-#ifdef EM_MULTIQUEUE
-#define EM_RDTR                         64
-#else
 #define EM_RDTR                         0
-#endif
 
 /*
  * Receive Interrupt Absolute Delay Timer (Not valid for 82542/82543/82544)
@@ -167,11 +188,7 @@
  *   along with EM_RDTR, may improve traffic throughput in specific network
  *   conditions.
  */
-#ifdef EM_MULTIQUEUE
-#define EM_RADV                         128
-#else
 #define EM_RADV                         64
-#endif
 
 /*
  * This parameter controls whether or not autonegotation is enabled.
@@ -304,7 +321,8 @@
 #define EM_MSIX_LINK		0x01000000 /* For 82574 use */
 #define ETH_ZLEN		60
 #define ETH_ADDR_LEN		6
-#define CSUM_OFFLOAD		7	/* Offload bits in mbuf flag */
+#define EM_CSUM_OFFLOAD		7	/* Offload bits in mbuf flag */
+#define IGB_CSUM_OFFLOAD	0x0E0F	/* Offload bits in mbuf flag */
 
 #define IGB_PKTTYPE_MASK	0x0000FFF0
 #define IGB_DMCTLX_DCFLUSH_DIS	0x80000000  /* Disable DMA Coalesce Flush */
@@ -338,14 +356,14 @@ struct em_int_delay_info {
  */
 struct tx_ring {
         struct adapter          *adapter;
-	struct em_tx_queue      *que;
-        u32                     me;
-        int			busy;
 	struct e1000_tx_desc	*tx_base;
 	uint64_t                tx_paddr; 
-        struct em_txbuffer	*tx_buffers;
-	u32			tx_tso;		/* last tx was tso */
-
+	qidx_t			*tx_rsq;
+	bool			tx_tso;		/* last tx was tso */
+	uint8_t			me;
+	qidx_t			tx_rs_cidx;
+	qidx_t			tx_rs_pidx;
+	qidx_t			tx_cidx_processed;
 	/* Interrupt resources */
 	void                    *tag;
 	struct resource         *res;
@@ -418,7 +436,7 @@ struct adapter {
 #define intr_type shared->isc_intr
 	/* FreeBSD operating-system-specific structures. */
 	struct e1000_osdep osdep;
-	struct device	*dev;
+	device_t	dev;
 	struct cdev	*led_dev;
 
         struct em_tx_queue *tx_queues;
@@ -513,10 +531,6 @@ typedef struct _em_vendor_info_t {
 	unsigned int subdevice_id;
 	unsigned int index;
 } em_vendor_info_t;
-
-struct em_txbuffer {
-	int		eop;  
-};
 
 
 #define	EM_CORE_LOCK_INIT(_sc, _name) \

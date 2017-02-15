@@ -437,7 +437,7 @@ ixgbe_if_tx_queues_alloc(if_ctx_t ctx, caddr_t *vaddrs, uint64_t *paddrs, int nt
 	struct adapter *adapter = iflib_get_softc(ctx);
 	if_softc_ctx_t scctx = adapter->shared;
 	struct ix_tx_queue *que;
-	int i, j, error;
+	int i, error;
 #ifdef PCI_IOV
 	enum ixgbe_iov_mode mode;
 #endif
@@ -464,8 +464,8 @@ ixgbe_if_tx_queues_alloc(if_ctx_t ctx, caddr_t *vaddrs, uint64_t *paddrs, int nt
 	for (i = 0, que = adapter->tx_queues; i < ntxqsets; i++, que++) {
 		struct tx_ring		*txr = &que->txr;
 
-		if (!(txr->tx_buffers = (struct ixgbe_tx_buf *) malloc(sizeof(struct ixgbe_tx_buf) * scctx->isc_ntxd[0], M_DEVBUF, M_NOWAIT | M_ZERO))) {
-			device_printf(iflib_get_dev(ctx), "failed to allocate tx_buffer memory\n");
+		if (!(txr->tx_rsq = (qidx_t *) malloc(sizeof(qidx_t) * scctx->isc_ntxd[0], M_DEVBUF, M_NOWAIT | M_ZERO))) {
+			device_printf(iflib_get_dev(ctx), "failed to allocate qidx memory\n");
 			error = ENOMEM;
 			goto fail;
 		}
@@ -483,10 +483,6 @@ ixgbe_if_tx_queues_alloc(if_ctx_t ctx, caddr_t *vaddrs, uint64_t *paddrs, int nt
 		txr->tx_base = (union ixgbe_adv_tx_desc *)vaddrs[i];
 		txr->tx_paddr = paddrs[i];
 
-		txr->que = que;
-		for (j = 0; j < scctx->isc_ntxd[0]; j++) {
-			txr->tx_buffers[j].eop = -1;
-		}
 		txr->bytes = 0;
 		txr->total_packets = 0;
 
@@ -578,11 +574,12 @@ ixgbe_if_queues_free(if_ctx_t ctx)
 
         for (i = 0; i < adapter->num_tx_queues; i++, tx_que++) {
 		struct tx_ring		*txr = &tx_que->txr;
-		if (txr->tx_buffers == NULL)
-		  break;
 
-		free(txr->tx_buffers, M_DEVBUF);
-		txr->tx_buffers = NULL;
+		if (txr->tx_rsq == NULL)
+			break;
+
+		free(txr->tx_rsq, M_DEVBUF);
+		txr->tx_rsq = NULL;
 	}
 	
 	free(adapter->tx_queues, M_DEVBUF);
@@ -3062,7 +3059,6 @@ ixgbe_if_init(if_ctx_t ctx)
 	for (i = 0, tx_que = adapter->tx_queues; i < adapter->num_tx_queues; i++, tx_que++) {
 		struct tx_ring		*txr = &tx_que->txr;
 
-		ixgbe_init_tx_ring(tx_que);
 		txdctl = IXGBE_READ_REG(hw, IXGBE_TXDCTL(txr->me));
 		txdctl |= IXGBE_TXDCTL_ENABLE;
 		/* Set WTHRESH to 8, burst writeback */

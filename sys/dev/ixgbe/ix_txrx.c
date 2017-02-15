@@ -56,14 +56,13 @@
  *  Local Function prototypes
  *********************************************************************/
 static int ixgbe_isc_txd_encap(void *arg, if_pkt_info_t pi);
-static void ixgbe_isc_txd_flush(void *arg, uint16_t txqid, uint32_t pidx);
-static int ixgbe_isc_txd_credits_update(void *arg, uint16_t txqid, uint32_t cidx, bool clear);
+static void ixgbe_isc_txd_flush(void *arg, uint16_t txqid, qidx_t pidx);
+static int ixgbe_isc_txd_credits_update(void *arg, uint16_t txqid, bool clear);
 
-static void ixgbe_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
-				   uint32_t pidx, uint64_t *paddrs, caddr_t *vaddrs __unused, uint16_t count, uint16_t buf_len);
-static void ixgbe_isc_rxd_flush(void *arg, uint16_t rxqid, uint8_t flid __unused, uint32_t pidx);
-static int ixgbe_isc_rxd_available(void *arg, uint16_t rxqid, uint32_t idx,
-				   int budget);
+static void ixgbe_isc_rxd_refill(void *arg, if_rxd_update_t iru);
+static void ixgbe_isc_rxd_flush(void *arg, uint16_t rxqid, uint8_t flid __unused, qidx_t pidx);
+static int ixgbe_isc_rxd_available(void *arg, uint16_t rxqid, qidx_t idx,
+				   qidx_t budget);
 static int ixgbe_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri);
 
 static void ixgbe_rx_checksum(u32 staterr, if_rxd_info_t ri, u32 ptype);
@@ -85,18 +84,6 @@ struct if_txrx ixgbe_txrx  = {
 
 extern if_shared_ctx_t ixgbe_sctx;
 
-void
-ixgbe_init_tx_ring(struct ix_tx_queue *que)
-{
-	struct tx_ring *txr = &que->txr;
-	if_softc_ctx_t scctx = que->adapter->shared;
-	struct ixgbe_tx_buf *buf;
-
-	buf = txr->tx_buffers;
-	for (int i = 0; i < scctx->isc_ntxd[0]; i++, buf++) {
-		buf->eop = -1;
-	}
-}
 /*********************************************************************
  *
  *  Advanced Context Descriptor setup for VLAN, CSUM or TSO
@@ -182,23 +169,23 @@ ixgbe_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	if_softc_ctx_t scctx = sc->shared;
 	struct ix_tx_queue *que     = &sc->tx_queues[pi->ipi_qsidx];
 	struct tx_ring *txr      = &que->txr;
-	struct ixgbe_tx_buf *buf;
 	int         nsegs        = pi->ipi_nsegs;
 	bus_dma_segment_t *segs  = pi->ipi_segs;
 	union ixgbe_adv_tx_desc *txd = NULL;
 	struct ixgbe_adv_tx_context_desc *TXD;
-	int                     i, j, first, cidx_last;
-	u32                     olinfo_status, cmd, flags;
+	int                     i, j, first;
+	u32                     olinfo_status, cmd, txd_flags;
+	qidx_t ntxd, pidx_last;
 
 	cmd =  (IXGBE_ADVTXD_DTYP_DATA |
 		IXGBE_ADVTXD_DCMD_IFCS | IXGBE_ADVTXD_DCMD_DEXT);
 
 	if (pi->ipi_mflags & M_VLANTAG)
 		cmd |= IXGBE_ADVTXD_DCMD_VLE;
-  
-	i = first = pi->ipi_pidx;
-	flags = (pi->ipi_flags & IPI_TX_INTR) ? IXGBE_TXD_CMD_RS : 0;
 
+	ntxd = scctx->isc_ntxd[0];
+	i = first = pi->ipi_pidx;
+	txd_flags = (pi->ipi_flags & IPI_TX_INTR) ? IXGBE_TXD_CMD_RS : 0;
 	TXD = (struct ixgbe_adv_tx_context_desc *) &txr->tx_base[first];
 	if (pi->ipi_csum_flags & CSUM_OFFLOAD || IXGBE_IS_X550VF(sc) || pi->ipi_vtag) {
 		/*********************************************
@@ -211,7 +198,7 @@ ixgbe_isc_txd_encap(void *arg, if_pkt_info_t pi)
 			++txr->tso_tx;
 		}
 
-		if (++i == scctx->isc_ntxd[0])
+		if (++i == ntxd)
 			i = 0;
 	} else {
 		/* Indicate the whole packet as payload when not doing TSO */
@@ -224,26 +211,28 @@ ixgbe_isc_txd_encap(void *arg, if_pkt_info_t pi)
 		bus_addr_t segaddr;
 
 		txd = &txr->tx_base[i];
-		buf = &txr->tx_buffers[i];
 		seglen = segs[j].ds_len;
 		segaddr = htole64(segs[j].ds_addr);
 
 		txd->read.buffer_addr = segaddr;
-		txd->read.cmd_type_len = htole32(flags | cmd | seglen);
+		txd->read.cmd_type_len = htole32(cmd | seglen);
 		txd->read.olinfo_status = htole32(olinfo_status);
 
-		cidx_last = i;
-		if (++i == scctx->isc_ntxd[0]) {
+		pidx_last = i;
+		if (++i == ntxd) {
 			i = 0;
 		}
 	}
+	if (txd_flags) {
+		txr->tx_rsq[txr->tx_rs_pidx] = pidx_last;
+		txr->tx_rs_pidx = (txr->tx_rs_pidx+1) & (ntxd-1);
+		MPASS(txr->tx_rs_pidx != txr->tx_rs_cidx);
+	}
 
 	txd->read.cmd_type_len |=
-		htole32(IXGBE_TXD_CMD_EOP | IXGBE_TXD_CMD_RS);
+		htole32(IXGBE_TXD_CMD_EOP | txd_flags);
 
 	/* Set the EOP descriptor that will be marked done */
-	buf = &txr->tx_buffers[first];
-	buf->eop = cidx_last;
 
 	txr->bytes += pi->ipi_len;
 	pi->ipi_new_pidx = i;
@@ -254,7 +243,7 @@ ixgbe_isc_txd_encap(void *arg, if_pkt_info_t pi)
 }
   
 static void
-ixgbe_isc_txd_flush(void *arg, uint16_t txqid, uint32_t pidx)
+ixgbe_isc_txd_flush(void *arg, uint16_t txqid, qidx_t pidx)
 {
 	struct adapter *sc       = arg;
 	struct ix_tx_queue *que     = &sc->tx_queues[txqid];
@@ -264,82 +253,63 @@ ixgbe_isc_txd_flush(void *arg, uint16_t txqid, uint32_t pidx)
 }
 
 static int
-ixgbe_isc_txd_credits_update(void *arg, uint16_t txqid, uint32_t cidx_init, bool clear)
+ixgbe_isc_txd_credits_update(void *arg, uint16_t txqid, bool clear)
 {
 	struct adapter   *sc = arg;
 	if_softc_ctx_t scctx = sc->shared;
 	struct ix_tx_queue  *que = &sc->tx_queues[txqid];
 	struct tx_ring   *txr = &que->txr;
-	
-	u32		    cidx, ntxd, processed = 0;
-	u32               limit = sc->tx_process_limit;
 
-	struct ixgbe_tx_buf	*buf;
-	union ixgbe_adv_tx_desc *txd;
+	qidx_t processed = 0;
+	int updated;
+	qidx_t cur, prev, ntxd, rs_cidx;
+	int32_t delta;
+	uint8_t status;
 
-	cidx = cidx_init;
+	rs_cidx = txr->tx_rs_cidx;
+	if (rs_cidx == txr->tx_rs_pidx)
+		return (0);
+	cur = txr->tx_rsq[rs_cidx];
+	status = txr->tx_base[cur].wb.status;
+	updated = !!(status & IXGBE_TXD_STAT_DD);
+	if (!clear || !updated)
+		return (updated);
 
-	buf = &txr->tx_buffers[cidx];
-	txd = &txr->tx_base[cidx];
+	prev = txr->tx_cidx_processed;
 	ntxd = scctx->isc_ntxd[0];
 	do {
-		int delta, eop = buf->eop;
-		union ixgbe_adv_tx_desc *eopd;
-
-		if (eop == -1) { /* No work */
+		delta = (int32_t)cur - (int32_t)prev;
+		MPASS(prev == 0 || delta != 0);
+		if (delta < 0)
+			delta += ntxd;
+		processed += delta;
+		prev  = cur;
+		rs_cidx = (rs_cidx + 1) & (ntxd-1);
+		if (rs_cidx  == txr->tx_rs_pidx)
 			break;
-		}
+		cur = txr->tx_rsq[rs_cidx];
+		status = txr->tx_base[cur].wb.status;
+	} while ((status & IXGBE_TXD_STAT_DD));
 
-		eopd = &txr->tx_base[eop];
-		if ((eopd->wb.status & IXGBE_TXD_STAT_DD) == 0) {
-			break;	/* I/O not complete */
-		} else if (clear)
-			buf->eop = -1; /* clear indicate processed */
-
-		/*
-		 *
-		 * update for multi segment case
-		 */
-		if (eop != cidx) {
-			delta = eop - cidx;
-			if (eop < cidx)
-				delta += ntxd;
-			processed += delta;
-			txd = eopd;
-			buf = &txr->tx_buffers[eop];
-			cidx = eop;
-		}
-		processed++;
-		if (clear)
-			++txr->packets;
-
-		/* Try the next packet */
-		txd++;
-		buf++;
-		cidx++;
-		/* reset with a wrap */
-		if (__predict_false(cidx == scctx->isc_ntxd[0])) {
-			cidx = 0;
-			buf = txr->tx_buffers;
-			txd = txr->tx_base;
-		}
-		prefetch(txd);
-		prefetch(txd+1);
-	} while (__predict_true(--limit) && cidx != cidx_init);
-
-	return (processed);
+	txr->tx_rs_cidx = rs_cidx;
+	txr->tx_cidx_processed = prev;
+	return(processed);
 }
 
 static void
-ixgbe_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
-				 uint32_t pidx, uint64_t *paddrs, caddr_t *vaddrs __unused, uint16_t count, uint16_t buf_len)
+ixgbe_isc_rxd_refill(void *arg, if_rxd_update_t iru)
 {
 	struct adapter *sc       = arg;
-	struct ix_rx_queue *que     = &sc->rx_queues[rxqid];
+	struct ix_rx_queue *que     = &sc->rx_queues[iru->iru_qsidx];
 	struct rx_ring *rxr      = &que->rxr;
 	int			i;
-	uint32_t next_pidx;
+	uint64_t *paddrs;
+	qidx_t next_pidx, pidx, count;
 
+	paddrs = iru->iru_paddrs;
+	pidx = iru->iru_pidx;
+	count = iru->iru_count;
+	
 	for (i = 0, next_pidx = pidx; i < count; i++) {
 		rxr->rx_base[next_pidx].read.pkt_addr = htole64(paddrs[i]);
 		if (++next_pidx == sc->shared->isc_nrxd[0])
@@ -348,7 +318,7 @@ ixgbe_isc_rxd_refill(void *arg, uint16_t rxqid, uint8_t flid __unused,
 }
 
 static void
-ixgbe_isc_rxd_flush(void *arg, uint16_t rxqid, uint8_t flid __unused, uint32_t pidx)
+ixgbe_isc_rxd_flush(void *arg, uint16_t rxqid, uint8_t flid __unused, qidx_t pidx)
 {
 	struct adapter *sc       = arg;
 	struct ix_rx_queue *que     = &sc->rx_queues[rxqid];
@@ -358,7 +328,7 @@ ixgbe_isc_rxd_flush(void *arg, uint16_t rxqid, uint8_t flid __unused, uint32_t p
 }
 
 static int
-ixgbe_isc_rxd_available(void *arg, uint16_t rxqid, uint32_t idx, int budget)
+ixgbe_isc_rxd_available(void *arg, uint16_t rxqid, qidx_t idx, qidx_t budget)
 {
 	struct adapter *sc       = arg;
 	struct ix_rx_queue *que     = &sc->rx_queues[rxqid];
@@ -493,10 +463,8 @@ ixgbe_rx_checksum(u32 staterr, if_rxd_info_t ri, u32 ptype)
 	}
 	if (status & IXGBE_RXD_STAT_L4CS) {
 		u64 type = (CSUM_DATA_VALID | CSUM_PSEUDO_HDR);
-#if __FreeBSD_version >= 800000
 		if (sctp)
 			type = CSUM_SCTP_VALID;
-#endif
 		if (!(errors & IXGBE_RXD_ERR_TCPE)) {
 			ri->iri_csum_flags |= type;
 			if (!sctp)

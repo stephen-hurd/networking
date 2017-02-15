@@ -319,13 +319,15 @@ struct ixgbe_mc_addr {
  * The transmit ring, one per queue
  */
 struct tx_ring {
-	struct ix_tx_queue	*que;
 	struct adapter		*adapter;
-	u32			me;
+	qidx_t			*tx_rsq;
+	qidx_t			tx_rs_cidx;
+	qidx_t			tx_rs_pidx;
+	qidx_t			tx_cidx_processed;
+	u16			me;
 	u32			tail;
-	int			busy;
+	u32			busy;
 	union ixgbe_adv_tx_desc	*tx_base;
-	struct ixgbe_tx_buf	*tx_buffers;
 	uint64_t tx_paddr;
 #ifdef IXGBE_FDIR
 	u16			atr_sample;
@@ -654,7 +656,6 @@ int	ixgbe_dma_malloc(struct adapter *,
 	    bus_size_t, struct ixgbe_dma_alloc *, int);
 void	ixgbe_dma_free(struct adapter *, struct ixgbe_dma_alloc *);
 int	ixgbe_get_regs(SYSCTL_HANDLER_ARGS);
-void	ixgbe_init_tx_ring(struct ix_tx_queue *que);
 
 #ifdef PCI_IOV
 

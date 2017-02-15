@@ -30,4 +30,10 @@ include GENERIC
 
 ident   GENERIC-NOIFLIB
 
-nooptions	IFLIB
+nooptions       IFLIB
+nodevice	em
+nodevice	ix
+nodevice	ixv
+nodevice	ixl
+nodevice	ixlv
+
