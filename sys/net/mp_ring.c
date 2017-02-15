@@ -194,6 +194,10 @@ drain_ring_lockless(struct ifmp_ring *r, union ring_state os, uint16_t prev, int
 	pending = 0;
 	total = 0;
 
+	if (cidx == pidx) {
+		r->drain(r, cidx, pidx);
+		return;
+	}
 	while (cidx != pidx) {
 
 		/* Items from cidx to pidx are available for consumption. */
