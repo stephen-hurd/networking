@@ -194,10 +194,6 @@ drain_ring_lockless(struct ifmp_ring *r, union ring_state os, uint16_t prev, int
 	pending = 0;
 	total = 0;
 
-	if (cidx == pidx) {
-		r->drain(r, cidx, pidx);
-		return;
-	}
 	while (cidx != pidx) {
 
 		/* Items from cidx to pidx are available for consumption. */
@@ -481,13 +477,23 @@ ifmp_ring_check_drainage(struct ifmp_ring *r, int budget)
 	union ring_state os, ns;
 
 	os.state = r->state;
-	if (os.flags != STALLED || os.pidx_head != os.pidx_tail || r->can_drain(r) == 0)
+	if (os.flags != STALLED || os.pidx_head != os.pidx_tail) {
+		if (r->can_drain(r)) {
+			ns.state = os.state;
+			ns.flags = BUSY;
+			if (!atomic_cmpset_acq_64(&r->state, os.state, ns.state))
+				return;
+			r->drain(r, 0, 0);
+			ns.flags = IDLE;
+			r->state = ns.state;
+		}
 		return;
-
+	}
+	if (r->can_drain(r) == 0)
+		return;
 	MPASS(os.cidx != os.pidx_tail);	/* implied by STALLED */
 	ns.state = os.state;
 	ns.flags = BUSY;
-
 
 #ifdef NO_64BIT_ATOMICS
 	mtx_lock(&r->lock);
@@ -505,7 +511,6 @@ ifmp_ring_check_drainage(struct ifmp_ring *r, int budget)
 	 */
 	if (!atomic_cmpset_acq_64(&r->state, os.state, ns.state))
 		return;
-
 
 	drain_ring_lockless(r, ns, os.flags, budget);
 #endif
