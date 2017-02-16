@@ -2510,6 +2510,17 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 #define TXQ_MAX_DB_DEFERRED(txq) TXD_NOTIFY_MASK(txq)
 #define TXQ_MAX_DB_CONSUMED(size) (size >> 4)
 
+/* forward compatibility for cxgb */
+#define FIRST_QSET(ctx) 0
+
+#define NTXQSETS(ctx) ((ctx)->ifc_softc_ctx.isc_ntxqsets)
+#define NRXQSETS(ctx) ((ctx)->ifc_softc_ctx.isc_nrxqsets)
+#define QIDX(ctx, m) ((((m)->m_pkthdr.flowid & ctx->ifc_softc_ctx.isc_rss_table_mask) % NTXQSETS(ctx)) + FIRST_QSET(ctx))
+#define DESC_RECLAIMABLE(q) ((int)((q)->ift_processed - (q)->ift_cleaned - (q)->ift_ctx->ifc_softc_ctx.isc_tx_nsegments))
+/* XXX we should be setting this to something other than zero */
+#define RECLAIM_THRESH(ctx) ((ctx)->ifc_sctx->isc_tx_reclaim_thresh)
+#define MAX_TX_DESC(ctx) ((ctx)->ifc_softc_ctx.isc_tx_tso_segments_max)
+
 static __inline void
 iflib_txd_db_check(if_ctx_t ctx, iflib_txq_t txq, int ring)
 {
@@ -3057,17 +3068,6 @@ defrag_failed:
 	*m_headp = NULL;
 	return (ENOMEM);
 }
-
-/* forward compatibility for cxgb */
-#define FIRST_QSET(ctx) 0
-
-#define NTXQSETS(ctx) ((ctx)->ifc_softc_ctx.isc_ntxqsets)
-#define NRXQSETS(ctx) ((ctx)->ifc_softc_ctx.isc_nrxqsets)
-#define QIDX(ctx, m) ((((m)->m_pkthdr.flowid & ctx->ifc_softc_ctx.isc_rss_table_mask) % NTXQSETS(ctx)) + FIRST_QSET(ctx))
-#define DESC_RECLAIMABLE(q) ((int)((q)->ift_processed - (q)->ift_cleaned - (q)->ift_ctx->ifc_softc_ctx.isc_tx_nsegments))
-/* XXX we should be setting this to something other than zero */
-#define RECLAIM_THRESH(ctx) ((ctx)->ifc_sctx->isc_tx_reclaim_thresh)
-#define MAX_TX_DESC(ctx) ((ctx)->ifc_softc_ctx.isc_tx_tso_segments_max)
 
 static void
 iflib_tx_desc_free(iflib_txq_t txq, int n)
