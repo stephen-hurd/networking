@@ -2042,10 +2042,6 @@ iflib_timer(void *arg)
 	 * per second. 
 	 */
 	coalesce = (txq->ift_processed - txq->ift_processed_last > IFLIB_MIN_DESC_SEC/2);
-#ifdef INVARIANTS
-	if (txq->ift_coalescing != coalesce)
-		IFDI_DEBUG(ctx);
-#endif
 	txq->ift_coalescing = coalesce;
 	txq->ift_processed_last = txq->ift_processed;
 	/* handle any laggards */
