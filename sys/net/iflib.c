@@ -3001,7 +3001,8 @@ defrag:
 	 * However, this also means that the driver will need to keep track
 	 * of the descriptors that RS was set on to check them for the DD bit.
 	 */
-	if (pidx == notify || pidx + nsegs > notify || iflib_no_tx_batch)
+	if (pidx == notify || pidx + nsegs > notify || iflib_no_tx_batch ||
+	    (TXQ_AVAIL(txq) - nsegs) <= MAX_TX_DESC(ctx))
 		pi.ipi_flags |= IPI_TX_INTR;
 
 	pi.ipi_segs = segs;
@@ -3289,7 +3290,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 			break;
 		}
 	}
-	iflib_txd_db_check(ctx, txq, (reclaimed && !ring) || err);
+	iflib_txd_db_check(ctx, txq, (reclaimed && !ring) || err || (TXQ_AVAIL(txq) < MAX_TX_DESC(ctx)));
 	if_inc_counter(ifp, IFCOUNTER_OBYTES, bytes_sent);
 	if_inc_counter(ifp, IFCOUNTER_OPACKETS, pkt_sent);
 	if (mcast_sent)
