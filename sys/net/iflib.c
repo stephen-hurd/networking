@@ -94,13 +94,6 @@ __FBSDID("$FreeBSD: head/sys/net/iflib.c 302439 2016-07-08 17:04:21Z cem $");
 #endif
 
 /*
- * Raise coalesce threshold
- * Re-enable tx interrupts
- * do a gratuitous ARP every timer interrupt
- */
-
-
-/*
  * enable accounting of every mbuf as it comes in to and goes out of
  * iflib's software descriptor references
  */
