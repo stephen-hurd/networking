@@ -3012,7 +3012,7 @@ defrag:
 	 * However, this also means that the driver will need to keep track
 	 * of the descriptors that RS was set on to check them for the DD bit.
 	 */
-	if (pidx == notify || pidx + nsegs > notify || iflib_no_tx_batch ||
+	if (pidx == notify || pidx + nsegs + 2 > notify || iflib_no_tx_batch ||
 	    (TXQ_AVAIL(txq) - nsegs) <= MAX_TX_DESC(ctx))
 		pi.ipi_flags |= IPI_TX_INTR;
 
