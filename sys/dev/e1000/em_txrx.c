@@ -104,10 +104,13 @@ em_dump_rs(struct adapter *adapter)
 		que = &adapter->tx_queues[qid];
 		txr =  &que->txr;
 		rs_cidx = txr->tx_rs_cidx;
-		cur = txr->tx_rsq[rs_cidx];
-		status = txr->tx_base[cur].upper.fields.status;
-		if (!(status & E1000_TXD_STAT_DD))
-			printf("qid: %d rsq[%d]: %d not set ", qid, rs_cidx, cur);
+		if (rs_cidx != txr->tx_rs_pidx) {
+			cur = txr->tx_rsq[rs_cidx];
+			status = txr->tx_base[cur].upper.fields.status;
+			if (!(status & E1000_TXD_STAT_DD))
+				printf("qid[%d]->tx_rsq[%d]: %d clear ", qid, rs_cidx, cur);
+		}
+		printf("cidx_prev=%d rs_pidx=%d ",txr->tx_cidx_processed, txr->tx_rs_pidx);
 		for (i = 0; i < ntxd; i++) {
 			if (txr->tx_base[i].upper.fields.status & E1000_TXD_STAT_DD)
 				printf("%d set ", i);
@@ -432,6 +435,7 @@ em_isc_txd_credits_update(void *arg, uint16_t txqid, bool clear)
 	if (rs_cidx == txr->tx_rs_pidx)
 		return (0);
 	cur = txr->tx_rsq[rs_cidx];
+	MPASS(cur != QIDX_INVALID);
 	status = txr->tx_base[cur].upper.fields.status;
 	updated = !!(status & E1000_TXD_STAT_DD);
 
@@ -455,6 +459,7 @@ em_isc_txd_credits_update(void *arg, uint16_t txqid, bool clear)
 		if (rs_cidx  == txr->tx_rs_pidx)
 			break;
 		cur = txr->tx_rsq[rs_cidx];
+		MPASS(cur != QIDX_INVALID);
 		status = txr->tx_base[cur].upper.fields.status;
 	} while ((status & E1000_TXD_STAT_DD));
 

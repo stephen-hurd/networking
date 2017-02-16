@@ -752,6 +752,7 @@ em_if_attach_pre(if_ctx_t ctx)
 	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)),
 	    OID_AUTO, "rs_dump", CTLTYPE_INT | CTLFLAG_RW, adapter, 0,
 	    em_get_rs, "I", "Dump RS indexes");
+
 	/* Determine hardware and mac info */
 	em_identify_hardware(ctx);
 
@@ -2585,7 +2586,7 @@ em_if_tx_queues_alloc(if_ctx_t ctx, caddr_t *vaddrs, uint64_t *paddrs, int ntxqs
 	if_softc_ctx_t scctx = adapter->shared;
 	int error = E1000_SUCCESS;
 	struct em_tx_queue *que; 
-        int i;
+        int i, j;
 
 	MPASS(adapter->tx_num_queues > 0);
 	MPASS(adapter->tx_num_queues == ntxqsets);
@@ -2599,22 +2600,23 @@ em_if_tx_queues_alloc(if_ctx_t ctx, caddr_t *vaddrs, uint64_t *paddrs, int ntxqs
 	}
 
 	for (i = 0, que = adapter->tx_queues; i < adapter->tx_num_queues; i++, que++) {
-	     /* Set up some basics */
-	     struct tx_ring *txr = &que->txr;
-	     txr->adapter = que->adapter = adapter;
-	     que->me = txr->me =  i;
+		/* Set up some basics */
 
-	     /* Allocate report status array */
-	     if (!(txr->tx_rsq = (qidx_t *) malloc(sizeof(qidx_t) * scctx->isc_ntxd[0], M_DEVBUF, M_NOWAIT | M_ZERO))) {
-		     device_printf(iflib_get_dev(ctx), "failed to allocate rs_idxs memory\n");
-		     error = ENOMEM;
-		     goto fail;
-	     }
+		struct tx_ring *txr = &que->txr;
+		txr->adapter = que->adapter = adapter;
+		que->me = txr->me =  i;
 
-	  /* get the virtual and physical address of the hardware queues */
-	  txr->tx_base = (struct e1000_tx_desc *)vaddrs[i*ntxqs];
-	  txr->tx_paddr = paddrs[i*ntxqs];
-	  
+		/* Allocate report status array */
+		if (!(txr->tx_rsq = (qidx_t *) malloc(sizeof(qidx_t) * scctx->isc_ntxd[0], M_DEVBUF, M_NOWAIT | M_ZERO))) {
+			device_printf(iflib_get_dev(ctx), "failed to allocate rs_idxs memory\n");
+			error = ENOMEM;
+			goto fail;
+		}
+		for (j = 0; j < scctx->isc_ntxd[0]; j++)
+			txr->tx_rsq[j] = QIDX_INVALID;
+		/* get the virtual and physical address of the hardware queues */
+		txr->tx_base = (struct e1000_tx_desc *)vaddrs[i*ntxqs];
+		txr->tx_paddr = paddrs[i*ntxqs];
 	}
 	
 	device_printf(iflib_get_dev(ctx), "allocated for %d tx_queues\n", adapter->tx_num_queues);
@@ -4240,14 +4242,14 @@ em_get_rs(SYSCTL_HANDLER_ARGS)
 	int error;
 	int result;
 
-	result = -1;
+	result = 0;
 	error = sysctl_handle_int(oidp, &result, 0, req);
 
 	if (error || !req->newptr || result != 1)
 		return (error);
 	em_dump_rs(adapter);
 
-	return (0);
+	return (error);
 }
 
 static void
