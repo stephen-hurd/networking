@@ -96,9 +96,11 @@ em_dump_rs(struct adapter *adapter)
 	if_softc_ctx_t scctx = adapter->shared;
 	struct em_tx_queue *que;
 	struct tx_ring *txr;
-	qidx_t i, rs_cidx, ntxd, qid, cur;
+	qidx_t i, ntxd, qid, cur;
+	int16_t rs_cidx;
 	uint8_t status;
 
+	printf("\n");
 	ntxd = scctx->isc_ntxd[0];
 	for (qid = 0; qid < adapter->tx_num_queues; qid++) {
 		que = &adapter->tx_queues[qid];
@@ -109,14 +111,18 @@ em_dump_rs(struct adapter *adapter)
 			status = txr->tx_base[cur].upper.fields.status;
 			if (!(status & E1000_TXD_STAT_DD))
 				printf("qid[%d]->tx_rsq[%d]: %d clear ", qid, rs_cidx, cur);
+		} else {
+			rs_cidx = (rs_cidx-1)&(ntxd-1);
+			cur = txr->tx_rsq[rs_cidx];
+			printf("qid[%d]->tx_rsq[rs_cidx-1=%d]: %d  ", qid, rs_cidx, cur);
 		}
 		printf("cidx_prev=%d rs_pidx=%d ",txr->tx_cidx_processed, txr->tx_rs_pidx);
 		for (i = 0; i < ntxd; i++) {
 			if (txr->tx_base[i].upper.fields.status & E1000_TXD_STAT_DD)
 				printf("%d set ", i);
 		}
+		printf("\n");
 	}
-	printf("\n");
 }
 
 /**********************************************************************
