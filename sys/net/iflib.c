@@ -294,7 +294,7 @@ typedef struct iflib_sw_tx_desc_array {
 #define IFLIB_MAX_RX_REFRESH		32
 /* The minimum descriptors per second before we start coalescing */
 #define IFLIB_MIN_DESC_SEC		16384
-#define IFLIB_DEFAULT_TX_UPDATE_FREQ	16
+#define IFLIB_DEFAULT_TX_UPDATE_FREQ	8
 #define IFLIB_QUEUE_IDLE		0
 #define IFLIB_QUEUE_HUNG		1
 #define IFLIB_QUEUE_WORKING		2
@@ -324,9 +324,10 @@ struct iflib_txq {
 	qidx_t		ift_cidx_processed;
 	qidx_t		ift_pidx;
 	uint8_t		ift_gen;
-	uint8_t		ift_db_pending;
-	uint8_t		ift_npending;
 	uint8_t		ift_br_offset;
+	uint16_t	ift_npending;
+	uint16_t	ift_db_pending;
+	uint16_t	ift_rs_pending;
 	/* implicit pad */
 	uint8_t		ift_txd_size[8];
 	uint64_t	ift_processed;
@@ -2506,8 +2507,9 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 #define M_CSUM_FLAGS(m) ((m)->m_pkthdr.csum_flags)
 #define M_HAS_VLANTAG(m) (m->m_flags & M_VLANTAG)
 
-#define TXD_NOTIFY_MASK(txq) (((txq)->ift_size / (txq)->ift_update_freq)-1)
-#define TXQ_MAX_DB_DEFERRED(txq) TXD_NOTIFY_MASK(txq)
+#define TXD_NOTIFY_COUNT(txq) (((txq)->ift_size / (txq)->ift_update_freq)-1)
+#define TXQ_MAX_DB_DEFERRED(txq) min(TXD_NOTIFY_COUNT(txq), 0xff)
+#define TXQ_MAX_RS_DEFERRED(txq) min(TXD_NOTIFY_COUNT(txq), 0xff)
 #define TXQ_MAX_DB_CONSUMED(size) (size >> 4)
 
 /* forward compatibility for cxgb */
@@ -2898,7 +2900,7 @@ iflib_encap(iflib_txq_t txq, struct mbuf **m_headp)
 	void			*next_txd;
 	bus_dmamap_t		map;
 	struct if_pkt_info	pi;
-	int notify, mask, remap = 0;
+	int remap = 0;
 	int err, nsegs, ndesc, max_segs, pidx, cidx, next, ntxd;
 	bus_dma_tag_t desc_tag;
 
@@ -3004,17 +3006,18 @@ defrag:
 			GROUPTASK_ENQUEUE(&txq->ift_task);
 		return (ENOBUFS);
 	}
-	mask = TXD_NOTIFY_MASK(txq);
-	notify = (pidx + mask) & ~mask;
 	/*
 	 * On Intel cards we can greatly reduce the number of TX interrupts
 	 * we see by only setting report status on every Nth descriptor.
 	 * However, this also means that the driver will need to keep track
 	 * of the descriptors that RS was set on to check them for the DD bit.
 	 */
-	if (pidx == notify || pidx + nsegs + 2 > notify || iflib_no_tx_batch ||
-	    (TXQ_AVAIL(txq) - nsegs) <= MAX_TX_DESC(ctx))
+	txq->ift_rs_pending += nsegs + 1;
+	if (txq->ift_rs_pending > TXQ_MAX_RS_DEFERRED(txq) ||
+	     iflib_no_tx_batch || (TXQ_AVAIL(txq) - nsegs - 1) <= MAX_TX_DESC(ctx)) {
 		pi.ipi_flags |= IPI_TX_INTR;
+		txq->ift_rs_pending = 0;
+	}
 
 	pi.ipi_segs = segs;
 	pi.ipi_nsegs = nsegs;
@@ -3204,7 +3207,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 	struct ifnet *ifp = ctx->ifc_ifp;
 	struct mbuf **mp, *m;
 	int i, count, consumed, pkt_sent, bytes_sent, mcast_sent, avail;
-	int reclaimed, err, in_use_prev, desc_used, mask;
+	int reclaimed, err, in_use_prev, desc_used;
 	bool do_prefetch, ring, coalesce;
 
 	if (__predict_false(!(if_getdrvflags(ifp) & IFF_DRV_RUNNING) ||
@@ -3240,33 +3243,31 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		       avail, ctx->ifc_flags, TXQ_AVAIL(txq));
 #endif
 	do_prefetch = (ctx->ifc_flags & IFC_PREFETCH);
-	mask = TXD_NOTIFY_MASK(txq);
-	ring = false;
 	avail = TXQ_AVAIL(txq);
 	for (desc_used = i = 0; i < count && avail > MAX_TX_DESC(ctx) + 2; i++) {
-		int pidx_prev, notify, rem = do_prefetch ? count - i : 0;
+		int pidx_prev, rem = do_prefetch ? count - i : 0;
 
 		mp = _ring_peek_one(r, cidx, i, rem);
 		MPASS(mp != NULL && *mp != NULL);
 		if (__predict_false(*mp == (struct mbuf *)txq)) {
 			consumed++;
-			iflib_txd_db_check(ctx, txq, true);
+			reclaimed++;
 			continue;
 		}
 		in_use_prev = txq->ift_in_use;
 		pidx_prev = txq->ift_pidx;
-		if ((err = iflib_encap(txq, mp)) == ENOBUFS) {
+		err = iflib_encap(txq, mp);
+		if (__predict_false(err)) {
 			DBG_COUNTER_INC(txq_drain_encapfail);
 			/* no room - bail out */
-			break;
-		}
-
-		consumed++;
-		if (err) {
+			if (err == ENOBUFS)
+				break;
+			consumed++;
 			DBG_COUNTER_INC(txq_drain_encapfail);
 			/* we can't send this packet - skip it */
 			continue;
 		}
+		consumed++;
 		pkt_sent++;
 		m = *mp;
 		DBG_COUNTER_INC(tx_sent);
@@ -3277,20 +3278,14 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		avail = TXQ_AVAIL(txq);
 		txq->ift_db_pending += (txq->ift_in_use - in_use_prev);
 		desc_used += (txq->ift_in_use - in_use_prev);
-		notify = (pidx_prev + mask) & ~mask;
-		notify = (pidx_prev == notify || (pidx_prev + desc_used) > notify);
-		coalesce = (txq->ift_coalescing || avail < (txq->ift_size >> 2));
-		ring = (iflib_min_tx_latency || notify || !coalesce);
-		iflib_txd_db_check(ctx, txq, ring);
 		ETHER_BPF_MTAP(ifp, m);
 		if (__predict_false(!(ifp->if_drv_flags & IFF_DRV_RUNNING)))
 			break;
-		if (desc_used >= TXQ_MAX_DB_CONSUMED(txq->ift_size)) {
-			GROUPTASK_ENQUEUE(&txq->ift_task);
-			break;
-		}
 	}
-	iflib_txd_db_check(ctx, txq, (reclaimed && !ring) || err || (TXQ_AVAIL(txq) < MAX_TX_DESC(ctx)));
+	coalesce = (txq->ift_coalescing || avail < (txq->ift_size >> 1));
+	/* deliberate use of bitwise or to avoid gratuitous short-circuit */
+	ring = (iflib_min_tx_latency | !coalesce | reclaimed | err) || (TXQ_AVAIL(txq) < MAX_TX_DESC(ctx));
+	iflib_txd_db_check(ctx, txq, ring);
 	if_inc_counter(ifp, IFCOUNTER_OBYTES, bytes_sent);
 	if_inc_counter(ifp, IFCOUNTER_OPACKETS, pkt_sent);
 	if (mcast_sent)
