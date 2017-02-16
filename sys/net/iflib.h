@@ -43,7 +43,7 @@
  * in the future if the need arises.
  */
 typedef uint16_t qidx_t;
-
+#define QIDX_INVALID 0xFFFF
 /*
  * Most cards can handle much larger TSO requests
  * but the FreeBSD TCP stack will break on larger
