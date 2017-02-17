@@ -1342,13 +1342,13 @@ SYSINIT(iflib_record_started, SI_SUB_SMP + 1, SI_ORDER_FIRST,
 #endif
 
 static int
-iflib_fast_intr(void *arg)
+iflib_fast_intr_rxtx(void *arg)
 {
 	iflib_filter_info_t info = arg;
 	struct grouptask *gtask = info->ifi_task;
 	iflib_rxq_t rxq = (iflib_rxq_t)info->ifi_ctx;
 	if_ctx_t ctx;
-	int i;
+	int i, cidx;
 
 	if (!iflib_started)
 		return (FILTER_HANDLED);
@@ -1366,6 +1366,28 @@ iflib_fast_intr(void *arg)
 			continue;
 		GROUPTASK_ENQUEUE(&ctx->ifc_txqs[txqid].ift_task);
 	}
+	if (ctx->ifc_sctx->isc_flags & IFLIB_HAS_RXCQ)
+		cidx = rxq->ifr_cq_cidx;
+	else
+		cidx = rxq->ifr_fl[0].ifl_cidx;
+	if (iflib_rxd_avail(ctx, rxq, cidx, 1))
+		GROUPTASK_ENQUEUE(gtask);
+	return (FILTER_HANDLED);
+}
+
+static int
+iflib_fast_intr_ctx(void *arg)
+{
+	iflib_filter_info_t info = arg;
+	struct grouptask *gtask = info->ifi_task;
+
+	if (!iflib_started)
+		return (FILTER_HANDLED);
+
+	DBG_COUNTER_INC(fast_intrs);
+	if (info->ifi_filter != NULL && info->ifi_filter(info->ifi_filter_arg) == FILTER_HANDLED)
+		return (FILTER_HANDLED);
+
 	GROUPTASK_ENQUEUE(gtask);
 	return (FILTER_HANDLED);
 }
@@ -2480,16 +2502,6 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 #endif
 	if (avail)
 		return true;
-	/*
-	 * Handle any pending updates
-	 */
-	for (i = 0; i < rxq->ifr_ntxqirq; i++) {
-		qidx_t txqid = rxq->ifr_txqid[i];
-
-		if (ctx->isc_txd_credits_update(ctx->ifc_softc, txqid, false))
-			GROUPTASK_ENQUEUE(&ctx->ifc_txqs[txqid].ift_task);
-	}
-
 	return (iflib_rxd_avail(ctx, rxq, *cidxp, 1));
 }
 
@@ -4749,6 +4761,7 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 	cpuset_t cpus;
 	gtask_fn_t *fn;
 	int tqrid, err, cpuid;
+	driver_filter_t *intr_fast;
 	void *q;
 
 	info = &ctx->ifc_filter_info;
@@ -4762,6 +4775,7 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 		gtask = &ctx->ifc_txqs[qid].ift_task;
 		tqg = qgroup_if_io_tqg;
 		fn = _task_fn_tx;
+		intr_fast = iflib_fast_intr_rxtx;
 		GROUPTASK_INIT(gtask, 0, fn, q);
 		break;
 	case IFLIB_INTR_RX:
@@ -4770,6 +4784,7 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 		gtask = &ctx->ifc_rxqs[qid].ifr_task;
 		tqg = qgroup_if_io_tqg;
 		fn = _task_fn_rx;
+		intr_fast = iflib_fast_intr_rxtx;
 		GROUPTASK_INIT(gtask, 0, fn, q);
 		break;
 	case IFLIB_INTR_ADMIN:
@@ -4779,6 +4794,7 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 		gtask = &ctx->ifc_admin_task;
 		tqg = qgroup_if_config_tqg;
 		fn = _task_fn_admin;
+		intr_fast = iflib_fast_intr_ctx;
 		break;
 	default:
 		panic("unknown net intr type");
@@ -4789,7 +4805,7 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 	info->ifi_task = gtask;
 	info->ifi_ctx = q;
 
-	err = _iflib_irq_alloc(ctx, irq, rid, iflib_fast_intr, NULL, info,  name);
+	err = _iflib_irq_alloc(ctx, irq, rid, intr_fast, NULL, info,  name);
 	if (err != 0) {
 		device_printf(ctx->ifc_dev, "_iflib_irq_alloc failed %d\n", err);
 		return (err);
@@ -4880,7 +4896,7 @@ iflib_legacy_setup(if_ctx_t ctx, driver_filter_t filter, void *filter_arg, int *
 	info->ifi_ctx = ctx;
 
 	/* We allocate a single interrupt resource */
-	if ((err = _iflib_irq_alloc(ctx, irq, tqrid, iflib_fast_intr, NULL, info, name)) != 0)
+	if ((err = _iflib_irq_alloc(ctx, irq, tqrid, iflib_fast_intr_ctx, NULL, info, name)) != 0)
 		return (err);
 	GROUPTASK_INIT(gtask, 0, fn, q);
 	taskqgroup_attach(tqg, gtask, q, tqrid, name);
