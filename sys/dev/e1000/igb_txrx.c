@@ -395,6 +395,12 @@ igb_isc_rxd_available(void *arg, uint16_t rxqid, qidx_t idx, qidx_t budget)
 	u32                      staterr = 0;
 	int                      cnt, i, iter;
 
+	if (budget == 1) {
+		rxd = (union e1000_adv_rx_desc *)&rxr->rx_base[idx];
+		staterr = le32toh(rxd->wb.upper.status_error);
+		return (staterr & E1000_RXD_STAT_DD);
+	}
+
 	for (iter = cnt = 0, i = idx; iter < scctx->isc_nrxd[0] && iter <= budget;) {
 		rxd = (union e1000_adv_rx_desc *)&rxr->rx_base[i];
 		staterr = le32toh(rxd->wb.upper.status_error);	
@@ -409,13 +415,6 @@ igb_isc_rxd_available(void *arg, uint16_t rxqid, qidx_t idx, qidx_t budget)
 		if (staterr & E1000_RXD_STAT_EOP)
 			cnt++;
 		iter++;
-	}
-	{
-		struct e1000_hw *hw = &sc->hw;
-		int rdt, rdh;
-		rdt = E1000_READ_REG(hw, E1000_RDT(rxr->me));
-		rdh = E1000_READ_REG(hw, E1000_RDH(rxr->me));
-		DPRINTF(iflib_get_dev(sc->ctx), "sidx:%d eidx:%d iter=%d pktcnt=%d RDT=%d RDH=%d\n", idx, i, iter, cnt, rdt, rdh);
 	}
 	return (cnt);
 }

@@ -552,6 +552,12 @@ lem_isc_rxd_available(void *arg, uint16_t rxqid, qidx_t idx, qidx_t budget)
 	u32                      staterr = 0;
 	int                      cnt, i;
 
+	if (budget == 1) {
+		rxd = (struct e1000_rx_desc *)&rxr->rx_base[idx];
+		staterr = rxd->status;
+		return (staterr & E1000_RXD_STAT_DD);
+	}
+
 	for (cnt = 0, i = idx; cnt < scctx->isc_nrxd[0] && cnt <= budget;) {
 		rxd = (struct e1000_rx_desc *)&rxr->rx_base[i];
 		staterr = rxd->status;
@@ -578,6 +584,12 @@ em_isc_rxd_available(void *arg, uint16_t rxqid, qidx_t idx, qidx_t budget)
 	union e1000_rx_desc_extended *rxd;
 	u32                      staterr = 0;
 	int                      cnt, i;
+
+	if (budget == 1) {
+		rxd = &rxr->rx_base[idx];
+		staterr = le32toh(rxd->wb.upper.status_error);
+		return (staterr & E1000_RXD_STAT_DD);
+	}
 
 	for (cnt = 0, i = idx; cnt < scctx->isc_nrxd[0] && cnt <= budget;) {
 		rxd = &rxr->rx_base[i];
