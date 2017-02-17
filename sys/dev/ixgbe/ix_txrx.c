@@ -337,6 +337,12 @@ ixgbe_isc_rxd_available(void *arg, uint16_t rxqid, qidx_t idx, qidx_t budget)
 	u32                      staterr;
 	int                      cnt, i, nrxd;
 
+	if (budget == 1) {
+		rxd = &rxr->rx_base[idx];
+		staterr = le32toh(rxd->wb.upper.status_error);
+		return (staterr & IXGBE_RXD_STAT_DD);
+	}
+
 	nrxd = sc->shared->isc_nrxd[0];
 	for (cnt = 0, i = idx; cnt < nrxd-1 && cnt <= budget;) {
 		rxd = &rxr->rx_base[i];
