@@ -324,7 +324,6 @@ struct iflib_txq {
 	/* implicit pad */
 	uint8_t		ift_txd_size[8];
 	uint64_t	ift_processed;
-	uint64_t	ift_processed_last;
 	uint64_t	ift_cleaned;
 #if MEMORY_LOGGING
 	uint64_t	ift_enqueued;
@@ -353,7 +352,6 @@ struct iflib_txq {
 	uint8_t		ift_qstatus;
 	uint8_t		ift_closed;
 	uint8_t		ift_update_freq;
-	uint8_t		ift_coalescing;
 	struct iflib_filter_info ift_filter_info;
 	bus_dma_tag_t		ift_desc_tag;
 	bus_dma_tag_t		ift_tso_desc_tag;
@@ -2032,7 +2030,6 @@ iflib_timer(void *arg)
 {
 	iflib_txq_t txq = arg;
 	if_ctx_t ctx = txq->ift_ctx;
-	bool coalesce;
 
 	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
 		return;
@@ -2046,14 +2043,6 @@ iflib_timer(void *arg)
 		(ctx->ifc_pause_frames == 0))
 		goto hung;
 
-	/*
-	 * There is no benefit, and a potential cost to doing tx coalescing
-	 * when we're consuming fewer than 4k descriptors per descriptors
-	 * per second. 
-	 */
-	coalesce = (txq->ift_processed - txq->ift_processed_last > IFLIB_MIN_DESC_SEC/2);
-	txq->ift_coalescing = coalesce;
-	txq->ift_processed_last = txq->ift_processed;
 	/* handle any laggards */
 	if (txq->ift_db_pending)
 		GROUPTASK_ENQUEUE(&txq->ift_task);
@@ -2500,36 +2489,62 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 	return (iflib_rxd_avail(ctx, rxq, *cidxp, 1));
 }
 
+#define TXD_NOTIFY_COUNT(txq) (((txq)->ift_size / (txq)->ift_update_freq)-1)
+static inline qidx_t
+txq_max_db_deferred(iflib_txq_t txq, qidx_t in_use)
+{
+	qidx_t notify_count = TXD_NOTIFY_COUNT(txq);
+	if (in_use > 2*notify_count)
+		return (notify_count);
+	if (in_use > notify_count)
+		return (notify_count >> 3);
+	return (0);
+}
+
+static inline qidx_t
+txq_max_rs_deferred(iflib_txq_t txq)
+{
+	qidx_t notify_count = TXD_NOTIFY_COUNT(txq);
+	if (txq->ift_in_use > 2*notify_count)
+		return (notify_count);
+	if (txq->ift_in_use > notify_count)
+		return (notify_count >> 3);
+	return (notify_count >> 4);
+}
+
 #define M_CSUM_FLAGS(m) ((m)->m_pkthdr.csum_flags)
 #define M_HAS_VLANTAG(m) (m->m_flags & M_VLANTAG)
 
-#define TXD_NOTIFY_COUNT(txq) (((txq)->ift_size / (txq)->ift_update_freq)-1)
-#define TXQ_MAX_DB_DEFERRED(txq) min(TXD_NOTIFY_COUNT(txq), 0xff)
-#define TXQ_MAX_RS_DEFERRED(txq) min(TXD_NOTIFY_COUNT(txq), 0xff)
+#define TXQ_MAX_DB_DEFERRED(txq, in_use) txq_max_db_deferred((txq), (in_use))
+#define TXQ_MAX_RS_DEFERRED(txq) txq_max_rs_deferred(txq)
 #define TXQ_MAX_DB_CONSUMED(size) (size >> 4)
 
 /* forward compatibility for cxgb */
 #define FIRST_QSET(ctx) 0
-
 #define NTXQSETS(ctx) ((ctx)->ifc_softc_ctx.isc_ntxqsets)
 #define NRXQSETS(ctx) ((ctx)->ifc_softc_ctx.isc_nrxqsets)
 #define QIDX(ctx, m) ((((m)->m_pkthdr.flowid & ctx->ifc_softc_ctx.isc_rss_table_mask) % NTXQSETS(ctx)) + FIRST_QSET(ctx))
 #define DESC_RECLAIMABLE(q) ((int)((q)->ift_processed - (q)->ift_cleaned - (q)->ift_ctx->ifc_softc_ctx.isc_tx_nsegments))
+
 /* XXX we should be setting this to something other than zero */
 #define RECLAIM_THRESH(ctx) ((ctx)->ifc_sctx->isc_tx_reclaim_thresh)
 #define MAX_TX_DESC(ctx) ((ctx)->ifc_softc_ctx.isc_tx_tso_segments_max)
 
-static __inline void
-iflib_txd_db_check(if_ctx_t ctx, iflib_txq_t txq, int ring)
+static inline bool
+iflib_txd_db_check(if_ctx_t ctx, iflib_txq_t txq, int ring, qidx_t in_use)
 {
 	qidx_t dbval, max;
+	bool rang;
 
-	max = TXQ_MAX_DB_DEFERRED(txq);
+	rang = false;
+	max = TXQ_MAX_DB_DEFERRED(txq, in_use);
 	if (ring || txq->ift_db_pending >= max) {
 		dbval = txq->ift_npending ? txq->ift_npending : txq->ift_pidx;
 		ctx->isc_txd_flush(ctx->ifc_softc, txq->ift_id, dbval);
 		txq->ift_db_pending = txq->ift_npending = 0;
+		rang = true;
 	}
+	return (rang);
 }
 
 #ifdef PKT_DEBUG
@@ -3204,7 +3219,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 	struct mbuf **mp, *m;
 	int i, count, consumed, pkt_sent, bytes_sent, mcast_sent, avail;
 	int reclaimed, err, in_use_prev, desc_used;
-	bool do_prefetch, ring, coalesce;
+	bool do_prefetch, ring, rang;
 
 	if (__predict_false(!(if_getdrvflags(ifp) & IFF_DRV_RUNNING) ||
 			    !LINK_ACTIVE(ctx))) {
@@ -3212,7 +3227,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		return (0);
 	}
 	reclaimed = iflib_completed_tx_reclaim(txq, RECLAIM_THRESH(ctx));
-	iflib_txd_db_check(ctx, txq, !txq->ift_coalescing || reclaimed);
+	rang = iflib_txd_db_check(ctx, txq, reclaimed, txq->ift_in_use);
 	avail = IDXDIFF(pidx, cidx, r->size);
 	if (__predict_false(ctx->ifc_flags & IFC_QFLUSH)) {
 		DBG_COUNTER_INC(txq_drain_flushing);
@@ -3271,17 +3286,16 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		if (m->m_flags & M_MCAST)
 			mcast_sent++;
 
-		avail = TXQ_AVAIL(txq);
 		txq->ift_db_pending += (txq->ift_in_use - in_use_prev);
 		desc_used += (txq->ift_in_use - in_use_prev);
 		ETHER_BPF_MTAP(ifp, m);
 		if (__predict_false(!(ifp->if_drv_flags & IFF_DRV_RUNNING)))
 			break;
+		rang = iflib_txd_db_check(ctx, txq, false, in_use_prev);
 	}
-	coalesce = (txq->ift_coalescing || avail < (txq->ift_size >> 1));
 	/* deliberate use of bitwise or to avoid gratuitous short-circuit */
-	ring = (iflib_min_tx_latency | !coalesce | reclaimed | err) || (TXQ_AVAIL(txq) < MAX_TX_DESC(ctx));
-	iflib_txd_db_check(ctx, txq, ring);
+	ring = rang ? false  : (iflib_min_tx_latency | err) || (TXQ_AVAIL(txq) < MAX_TX_DESC(ctx));
+	iflib_txd_db_check(ctx, txq, ring, txq->ift_in_use);
 	if_inc_counter(ifp, IFCOUNTER_OBYTES, bytes_sent);
 	if_inc_counter(ifp, IFCOUNTER_OPACKETS, pkt_sent);
 	if (mcast_sent)
