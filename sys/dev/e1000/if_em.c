@@ -1137,17 +1137,22 @@ em_if_mtu_set(if_ctx_t ctx, uint32_t mtu)
 	  max_frame_size = 4096;
 	  break;
 	  /* Adapters that do not support jumbo frames */
+  case e1000_82542:
   case e1000_ich8lan:
 	  max_frame_size = ETHER_MAX_LEN;
 	  break;
   default:
-	  max_frame_size = MAX_JUMBO_FRAME_SIZE;
+	  if (adapter->hw.mac.type >= igb_mac_min)
+		  max_frame_size = 9234;
+	  else /* lem */
+		  max_frame_size = MAX_JUMBO_SIZE;
   }
   if (mtu > max_frame_size - ETHER_HDR_LEN - ETHER_CRC_LEN) {
 	  return (EINVAL);
   }
   
-  adapter->hw.mac.max_frame_size = if_getmtu(ifp) + ETHER_HDR_LEN + ETHER_CRC_LEN;
+  scctx->isc_max_frame_size = adapter->hw.mac.max_frame_size =
+	  if_getmtu(ifp) + ETHER_HDR_LEN + ETHER_CRC_LEN;
   return (0);
 }
 
