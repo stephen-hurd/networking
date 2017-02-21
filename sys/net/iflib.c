@@ -2276,10 +2276,9 @@ rxd_frag_to_sd(iflib_rxq_t rxq, if_rxd_frag_t irf, int unload, if_rxsd_t sd)
 		if (unload)
 			bus_dmamap_unload(fl->ifl_desc_tag, map);
 	}
-	if (__predict_false(++fl->ifl_cidx == fl->ifl_size)) {
-		fl->ifl_cidx = 0;
+	fl->ifl_cidx = (fl->ifl_cidx + 1) & (fl->ifl_size-1);
+	if (__predict_false(fl->ifl_cidx == 0))
 		fl->ifl_gen = 0;
-	}
 }
 
 static struct mbuf *
@@ -2428,6 +2427,7 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 		if (sctx->isc_flags & IFLIB_HAS_RXCQ) {
 			*cidxp = ri.iri_cidx;
 			/* Update our consumer index */
+			/* XXX NB: shurd - check if this is still safe */
 			while (rxq->ifr_cq_cidx >= scctx->isc_nrxd[0]) {
 				rxq->ifr_cq_cidx -= scctx->isc_nrxd[0];
 				rxq->ifr_cq_gen = 0;
