@@ -287,7 +287,7 @@ typedef struct iflib_sw_tx_desc_array {
 #define IFLIB_MAX_RX_REFRESH		32
 /* The minimum descriptors per second before we start coalescing */
 #define IFLIB_MIN_DESC_SEC		16384
-#define IFLIB_DEFAULT_TX_UPDATE_FREQ	8
+#define IFLIB_DEFAULT_TX_UPDATE_FREQ	32
 #define IFLIB_QUEUE_IDLE		0
 #define IFLIB_QUEUE_HUNG		1
 #define IFLIB_QUEUE_WORKING		2
@@ -2499,9 +2499,10 @@ static inline qidx_t
 txq_max_db_deferred(iflib_txq_t txq, qidx_t in_use)
 {
 	qidx_t notify_count = TXD_NOTIFY_COUNT(txq);
-	if (in_use > 2*notify_count)
+	qidx_t minthresh = txq->ift_size / 8;
+	if (in_use > 2*minthresh)
 		return (notify_count);
-	if (in_use > notify_count)
+	if (in_use > minthresh)
 		return (notify_count >> 3);
 	return (0);
 }
@@ -2510,9 +2511,10 @@ static inline qidx_t
 txq_max_rs_deferred(iflib_txq_t txq)
 {
 	qidx_t notify_count = TXD_NOTIFY_COUNT(txq);
-	if (txq->ift_in_use > 2*notify_count)
+	qidx_t minthresh = txq->ift_size / 8;
+	if (txq->ift_in_use > 2*minthresh)
 		return (notify_count);
-	if (txq->ift_in_use > notify_count)
+	if (txq->ift_in_use > minthresh)
 		return (notify_count >> 3);
 	return (notify_count >> 4);
 }
