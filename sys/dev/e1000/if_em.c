@@ -1173,7 +1173,6 @@ em_if_init(if_ctx_t ctx)
 {
         struct adapter *adapter = iflib_get_softc(ctx); 
 	struct ifnet *ifp = iflib_get_ifp(ctx); 
-
 	INIT_DEBUGOUT("em_if_init: begin");
 
 	/* Get the latest mac address, User can use a LAA */
@@ -1221,11 +1220,15 @@ em_if_init(if_ctx_t ctx)
 	*/
 	if (adapter->hw.mac.max_frame_size <= 2048)
 		adapter->rx_mbuf_sz = MCLBYTES;
+#ifndef CONTIGMALLOC_WORKS
+	else
+		adapter->rx_mbuf_sz = MJUMPAGESIZE;
+#else
 	else if (adapter->hw.mac.max_frame_size <= 4096)
 		adapter->rx_mbuf_sz = MJUMPAGESIZE;
 	else
 		adapter->rx_mbuf_sz = MJUM9BYTES;
-
+#endif
 	em_initialize_receive_unit(ctx);
 
 	/* Use real VLAN Filter support? */
@@ -3067,15 +3070,14 @@ em_initialize_receive_unit(if_ctx_t ctx)
 
 		if (if_getmtu(ifp) > ETHERMTU) {
 			/* Set maximum packet len */
-			psize = scctx->isc_max_frame_size;
-			if (psize <= 4096) {
+			if (adapter->rx_mbuf_sz <= 4096) {
 				srrctl |= 4096 >> E1000_SRRCTL_BSIZEPKT_SHIFT;
 				rctl |= E1000_RCTL_SZ_4096 | E1000_RCTL_BSEX;
-			} else if (psize > 4096) {
+			} else if (adapter->rx_mbuf_sz > 4096) {
 				srrctl |= 8192 >> E1000_SRRCTL_BSIZEPKT_SHIFT;
 				rctl |= E1000_RCTL_SZ_8192 | E1000_RCTL_BSEX;
 			}
-	
+			psize = scctx->isc_max_frame_size;
 			/* are we on a vlan? */
 			if (ifp->if_vlantrunk != NULL)
 				psize += VLAN_TAG_SIZE;
