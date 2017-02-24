@@ -1360,8 +1360,10 @@ iflib_fast_intr_rxtx(void *arg)
 
 		ctx = rxq->ifr_ctx;
 
-		if (!ctx->isc_txd_credits_update(ctx->ifc_softc, txqid, false))
+		if (!ctx->isc_txd_credits_update(ctx->ifc_softc, txqid, false)) {
+			IFDI_TX_QUEUE_INTR_ENABLE(ctx, txqid);
 			continue;
+		}
 		GROUPTASK_ENQUEUE(&ctx->ifc_txqs[txqid].ift_task);
 	}
 	if (ctx->ifc_sctx->isc_flags & IFLIB_HAS_RXCQ)
@@ -1370,6 +1372,8 @@ iflib_fast_intr_rxtx(void *arg)
 		cidx = rxq->ifr_fl[0].ifl_cidx;
 	if (iflib_rxd_avail(ctx, rxq, cidx, 1))
 		GROUPTASK_ENQUEUE(gtask);
+	else
+		IFDI_RX_QUEUE_INTR_ENABLE(ctx, rxq->ifr_id);
 	return (FILTER_HANDLED);
 }
 
