@@ -2524,7 +2524,7 @@ txq_max_rs_deferred(iflib_txq_t txq)
 	if (txq->ift_in_use > 2*minthresh)
 		return (notify_count);
 	if (txq->ift_in_use > minthresh)
-		return (notify_count >> 3);
+		return (notify_count >> 2);
 	return (notify_count >> 4);
 }
 
