@@ -1190,6 +1190,7 @@ iflib_netmap_rxq_init(if_ctx_t ctx, iflib_rxq_t rxq)
 
 #define iflib_netmap_attach(ctx) (0)
 #define netmap_rx_irq(ifp, qid, budget) (0)
+#define netmap_tx_irq(ifp, qid) (0)
 
 #endif
 
@@ -2401,11 +2402,13 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 	struct mbuf *m, *mh, *mt;
 
 	ifp = ctx->ifc_ifp;
+#ifdef DEV_NETMAP
 	if (ifp->if_capenable & IFCAP_NETMAP) {
 		u_int budget32 = budget;
 		if (netmap_rx_irq(ifp, rxq->ifr_id, &budget32))
 			return (FALSE);
 	}
+#endif
 
 	mh = mt = NULL;
 	MPASS(budget > 0);
