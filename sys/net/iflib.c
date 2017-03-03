@@ -945,10 +945,12 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 		return netmap_ring_reinit(kring);
 
 	/* XXX check sync modes */
-	for (i = 0, fl = rxq->ifr_fl; i < rxq->ifr_nfl; i++, fl++)
+	for (i = 0, fl = rxq->ifr_fl; i < rxq->ifr_nfl; i++, fl++) {
+		if (fl->ifl_sds.ifsd_map == NULL)
+			continue;
 		bus_dmamap_sync(rxq->ifr_fl[i].ifl_desc_tag, fl->ifl_ifdi->idi_map,
 				BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
-
+	}
 	/*
 	 * First part: import newly received packets.
 	 *
@@ -1041,12 +1043,14 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 		if (nm_i != head && i < IFLIB_MAX_RX_REFRESH)
 			continue;
 
-		iru.iru_pidx = nic_i;
+		iru.iru_pidx = nic_i_start;
 		iru.iru_count = i;
 		i = 0;
 		ctx->isc_rxd_refill(ctx->ifc_softc, &iru);
-		if (fl->ifl_sds.ifsd_map == NULL)
+		if (fl->ifl_sds.ifsd_map == NULL) {
+			nic_i_start = nic_i;
 			continue;
+		}
 		nic_i = nic_i_start;
 		for (n = 0; n < iru.iru_count; n++) {
 			bus_dmamap_sync(fl->ifl_ifdi->idi_tag, fl->ifl_sds.ifsd_map[nic_i],
@@ -2135,6 +2139,9 @@ iflib_init_locked(if_ctx_t ctx)
 	IFDI_INIT(ctx);
 	MPASS(if_getdrvflags(ifp) == i);
 	for (i = 0, rxq = ctx->ifc_rxqs; i < sctx->isc_nrxqsets; i++, rxq++) {
+		/* XXX this should really be done on a per-queue basis */
+		if (if_getcapenable(ifp) & IFCAP_NETMAP)
+			continue;
 		for (j = 0, fl = rxq->ifr_fl; j < rxq->ifr_nfl; j++, fl++) {
 			if (iflib_fl_setup(fl)) {
 				device_printf(ctx->ifc_dev, "freelist setup failed - check cluster settings\n");
@@ -2416,8 +2423,8 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 	ifp = ctx->ifc_ifp;
 #ifdef DEV_NETMAP
 	if (ifp->if_capenable & IFCAP_NETMAP) {
-		u_int budget32 = budget;
-		if (netmap_rx_irq(ifp, rxq->ifr_id, &budget32))
+		u_int work = 0;
+		if (netmap_rx_irq(ifp, rxq->ifr_id, &work))
 			return (FALSE);
 	}
 #endif
