@@ -747,6 +747,7 @@ iflib_netmap_register(struct netmap_adapter *na, int onoff)
 {
 	struct ifnet *ifp = na->ifp;
 	if_ctx_t ctx = ifp->if_softc;
+	int status;
 
 	CTX_LOCK(ctx);
 	IFDI_INTR_DISABLE(ctx);
@@ -763,10 +764,13 @@ iflib_netmap_register(struct netmap_adapter *na, int onoff)
 	} else {
 		nm_clear_native_flags(na);
 	}
-	IFDI_INIT(ctx);
+	iflib_init_locked(ctx);
 	IFDI_CRCSTRIP_SET(ctx, onoff, iflib_crcstrip); // XXX why twice ?
+	status = ifp->if_drv_flags & IFF_DRV_RUNNING ? 0 : 1;
+	if (status)
+		nm_clear_native_flags(na);
 	CTX_UNLOCK(ctx);
-	return (ifp->if_drv_flags & IFF_DRV_RUNNING ? 0 : 1);
+	return (status);
 }
 
 /*
@@ -1113,6 +1117,8 @@ iflib_netmap_txq_init(if_ctx_t ctx, iflib_txq_t txq)
 
 	slot = netmap_reset(na, NR_TX, txq->ift_id, 0);
 	if (slot == NULL)
+		return;
+	if (txq->ift_sds.ifsd_map == NULL)
 		return;
 
 	for (int i = 0; i < ctx->ifc_softc_ctx.isc_ntxd[0]; i++) {
@@ -2115,6 +2121,7 @@ iflib_init_locked(if_ctx_t ctx)
 		iflib_netmap_txq_init(ctx, txq);
 	}
 	for (i = 0, rxq = ctx->ifc_rxqs; i < sctx->isc_nrxqsets; i++, rxq++) {
+		MPASS(rxq->ifr_id == i);
 		iflib_netmap_rxq_init(ctx, rxq);
 	}
 #ifdef INVARIANTS
