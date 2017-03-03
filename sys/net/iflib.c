@@ -944,8 +944,6 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 	if (head > lim)
 		return netmap_ring_reinit(kring);
 
-	ri.iri_qsidx = kring->ring_id;
-	ri.iri_ifp = ctx->ifc_ifp;
 	/* XXX check sync modes */
 	for (i = 0, fl = rxq->ifr_fl; i < rxq->ifr_nfl; i++, fl++)
 		bus_dmamap_sync(rxq->ifr_fl[i].ifl_desc_tag, fl->ifl_ifdi->idi_map,
@@ -977,6 +975,11 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 			avail = ctx->isc_rxd_available(ctx->ifc_softc, kring->ring_id, nic_i, USHRT_MAX);
 			for (n = 0; avail > 0; n++, avail--) {
 				rxd_info_zero(&ri);
+				ri.iri_frags = rxq->ifr_frags;
+				ri.iri_qsidx = kring->ring_id;
+				ri.iri_ifp = ctx->ifc_ifp;
+				ri.iri_cidx = nic_i;
+
 				error = ctx->isc_rxd_pkt_get(ctx->ifc_softc, &ri);
 				ring->slot[nm_i].len = error ? 0 : ri.iri_len - crclen;
 				ring->slot[nm_i].flags = slot_flags;
@@ -1143,7 +1146,7 @@ iflib_netmap_rxq_init(if_ctx_t ctx, iflib_rxq_t rxq)
 	iflib_fl_t fl;
 	bus_dmamap_t *map;
 	int nrxd;
-	uint32_t i, j;
+	uint32_t i, j, pidx_start;
 
 	slot = netmap_reset(na, NR_RX, rxq->ifr_id, 0);
 	if (slot == NULL)
@@ -1158,12 +1161,12 @@ iflib_netmap_rxq_init(if_ctx_t ctx, iflib_rxq_t rxq)
 	iru.iru_buf_size = rxq->ifr_fl[0].ifl_buf_size;
 	iru.iru_flidx = 0;
 
-	for (i = j = 0; i < nrxd; i++, j++) {
+	for (pidx_start = i = j = 0; i < nrxd; i++, j++) {
 		int sj = netmap_idx_n2k(&na->rx_rings[rxq->ifr_id], i);
 		void *addr;
 
 		fl->ifl_rxd_idxs[j] = i;
-		addr = fl->ifl_vm_addrs[j] = PNMB(na, slot + sj, &fl->ifl_bus_addrs[i]);
+		addr = fl->ifl_vm_addrs[j] = PNMB(na, slot + sj, &fl->ifl_bus_addrs[j]);
 		if (map) {
 			netmap_load_map(na, rxq->ifr_fl[0].ifl_ifdi->idi_tag, *map, addr);
 			map++;
@@ -1172,9 +1175,11 @@ iflib_netmap_rxq_init(if_ctx_t ctx, iflib_rxq_t rxq)
 		if (j < IFLIB_MAX_RX_REFRESH && i < nrxd - 1)
 			continue;
 
-		iru.iru_pidx = i;
+		iru.iru_pidx = pidx_start;
+		pidx_start = i;
 		iru.iru_count = j;
 		j = 0;
+		MPASS(pidx_start + j <= nrxd);
 		/* Update descriptors and the cached value */
 		ctx->isc_rxd_refill(ctx->ifc_softc, &iru);
 	}
