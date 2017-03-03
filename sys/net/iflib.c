@@ -1027,7 +1027,6 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 		struct netmap_slot *slot = &ring->slot[nm_i];
 		void *addr = PNMB(na, slot, &fl->ifl_bus_addrs[i]);
 
-
 		if (addr == NETMAP_BUF_BASE(na)) /* bad buf */
 			goto ring_reset;
 
@@ -3411,6 +3410,7 @@ _task_fn_tx(void *context)
 	if ((ifp->if_capenable & IFCAP_NETMAP)) {
 		if (ctx->isc_txd_credits_update(ctx->ifc_softc, txq->ift_id, false))
 			netmap_tx_irq(ifp, txq->ift_id);
+		IFDI_TX_QUEUE_INTR_ENABLE(ctx, txq->ift_id);
 		return;
 	}
 	if (txq->ift_db_pending)
