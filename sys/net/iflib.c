@@ -704,6 +704,7 @@ static void iflib_add_device_sysctl_pre(if_ctx_t ctx);
 static void iflib_add_device_sysctl_post(if_ctx_t ctx);
 static void iflib_ifmp_purge(iflib_txq_t txq);
 static void _iflib_pre_assert(if_softc_ctx_t scctx);
+static void iflib_stop(if_ctx_t ctx);
 
 #ifdef DEV_NETMAP
 #include <sys/selinfo.h>
@@ -764,6 +765,7 @@ iflib_netmap_register(struct netmap_adapter *na, int onoff)
 	} else {
 		nm_clear_native_flags(na);
 	}
+	iflib_stop(ctx);
 	iflib_init_locked(ctx);
 	IFDI_CRCSTRIP_SET(ctx, onoff, iflib_crcstrip); // XXX why twice ?
 	status = ifp->if_drv_flags & IFF_DRV_RUNNING ? 0 : 1;
@@ -809,8 +811,9 @@ iflib_netmap_txsync(struct netmap_kring *kring, int flags)
 	if_ctx_t ctx = ifp->if_softc;
 	iflib_txq_t txq = &ctx->ifc_txqs[kring->ring_id];
 
-	bus_dmamap_sync(txq->ift_desc_tag, txq->ift_ifdi->idi_map,
-					BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
+	if (txq->ift_sds.ifsd_map)
+		bus_dmamap_sync(txq->ift_desc_tag, txq->ift_ifdi->idi_map,
+				BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 
 
 	/*
@@ -974,7 +977,7 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 		for (fl = rxq->ifr_fl, i = 0; i < rxq->ifr_nfl; i++, fl++) {
 			nic_i = fl->ifl_cidx;
 			nm_i = netmap_idx_n2k(kring, nic_i);
-			avail = ctx->isc_rxd_available(ctx->ifc_softc, kring->ring_id, nic_i, USHRT_MAX);
+			avail = iflib_rxd_avail(ctx, rxq, nic_i, USHRT_MAX);
 			for (n = 0; avail > 0; n++, avail--) {
 				rxd_info_zero(&ri);
 				ri.iri_frags = rxq->ifr_frags;
@@ -1953,6 +1956,13 @@ iflib_fl_bufs_free(iflib_fl_t fl)
 		*sd_cl = NULL;
 		*sd_m = NULL;
 	}
+#ifdef INVARIANTS
+	for (i = 0; i < fl->ifl_size; i++) {
+		MPASS(fl->ifl_sds.ifsd_flags[i] == 0);
+		MPASS(fl->ifl_sds.ifsd_cl[i] == NULL);
+		MPASS(fl->ifl_sds.ifsd_m[i] == NULL);
+	}
+#endif
 	/*
 	 * Reset free list values
 	 */
@@ -2195,9 +2205,9 @@ iflib_stop(if_ctx_t ctx)
 	if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
 
 	IFDI_INTR_DISABLE(ctx);
-	DELAY(100000);
+	DELAY(1000);
 	IFDI_STOP(ctx);
-	DELAY(100000);
+	DELAY(1000);
 
 	iflib_debug_reset();
 	/* Wait for current tx queue users to exit to disarm watchdog timer. */
