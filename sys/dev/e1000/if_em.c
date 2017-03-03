@@ -1172,7 +1172,9 @@ static void
 em_if_init(if_ctx_t ctx)
 {
         struct adapter *adapter = iflib_get_softc(ctx); 
-	struct ifnet *ifp = iflib_get_ifp(ctx); 
+	struct ifnet *ifp = iflib_get_ifp(ctx);
+	struct em_tx_queue *tx_que;
+	int i;
 	INIT_DEBUGOUT("em_if_init: begin");
 
 	/* Get the latest mac address, User can use a LAA */
@@ -1194,9 +1196,16 @@ em_if_init(if_ctx_t ctx)
 		    E1000_RAR_ENTRIES - 1);
 	}
 
+
 	/* Initialize the hardware */
 	em_reset(ctx);
 	em_if_update_admin_status(ctx);
+
+	for (i = 0, tx_que = adapter->tx_queues; i < adapter->tx_num_queues; i++, tx_que++) {
+		struct tx_ring		*txr = &tx_que->txr;
+
+		txr->tx_rs_cidx = txr->tx_rs_pidx = txr->tx_cidx_processed = 0;
+	}
 
 	/* Setup VLAN support, basic and offload if available */
 	E1000_WRITE_REG(&adapter->hw, E1000_VET, ETHERTYPE_VLAN);
