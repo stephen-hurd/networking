@@ -1720,7 +1720,7 @@ iflib_rxsd_alloc(iflib_rxq_t rxq)
 		for (int i = 0; i < scctx->isc_nrxd[rxq->ifr_fl_offset]; i++) {
 			err = bus_dmamap_create(fl->ifl_desc_tag, 0, &fl->ifl_sds.ifsd_map[i]);
 			if (err != 0) {
-				device_printf(dev, "Unable to create TX DMA map\n");
+				device_printf(dev, "Unable to create RX buffer DMA map\n");
 				goto fail;
 			}
 		}
@@ -1832,19 +1832,6 @@ _iflib_fl_refill(if_ctx_t ctx, iflib_fl_t fl, int count)
 #endif
 
 		DBG_COUNTER_INC(rx_allocs);
-#ifdef notyet
-		if ((sd_flags[pidx] & RX_SW_DESC_MAP_CREATED) == 0) {
-			int err;
-
-			if ((err = bus_dmamap_create(fl->ifl_ifdi->idi_tag, 0, &sd_map[idx]))) {
-				log(LOG_WARNING, "bus_dmamap_create failed %d\n", err);
-				uma_zfree(fl->ifl_zone, cl);
-				n = 0;
-				goto done;
-			}
-			sd_flags[idx] |= RX_SW_DESC_MAP_CREATED;
-		}
-#endif
 #if defined(__i386__) || defined(__amd64__)
 		if (!IS_DMAR(ctx)) {
 			bus_addr = pmap_kextract((vm_offset_t)cl);
@@ -1858,6 +1845,7 @@ _iflib_fl_refill(if_ctx_t ctx, iflib_fl_t fl, int count)
 			q = fl->ifl_rxq;
 			err = bus_dmamap_load(fl->ifl_desc_tag, sd_map[idx],
 		         cl, fl->ifl_buf_size, _rxq_refill_cb, &cb_arg, 0);
+			bus_dmamap_sync(fl->ifl_desc_tag, sd_map[idx], BUS_DMASYNC_PREREAD);
 
 			if (err != 0 || cb_arg.error) {
 				/*
@@ -1902,6 +1890,10 @@ done:
 		pidx = fl->ifl_size - 1;
 	else
 		pidx = fl->ifl_pidx - 1;
+
+	if (sd_map)
+		bus_dmamap_sync(fl->ifl_ifdi->idi_tag, fl->ifl_ifdi->idi_map,
+				BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 	ctx->isc_rxd_flush(ctx->ifc_softc, fl->ifl_rxq->ifr_id, fl->ifl_id, pidx);
 }
 
@@ -2291,6 +2283,7 @@ rxd_frag_to_sd(iflib_rxq_t rxq, if_rxd_frag_t irf, int unload, if_rxsd_t sd)
 	iflib_dma_info_t di;
 	int next;
 
+	map = NULL;
 	flid = irf->irf_flid;
 	cidx = irf->irf_idx;
 	fl = &rxq->ifr_fl[flid];
@@ -2322,6 +2315,9 @@ rxd_frag_to_sd(iflib_rxq_t rxq, if_rxd_frag_t irf, int unload, if_rxsd_t sd)
 	fl->ifl_cidx = (fl->ifl_cidx + 1) & (fl->ifl_size-1);
 	if (__predict_false(fl->ifl_cidx == 0))
 		fl->ifl_gen = 0;
+	if (map != NULL)
+		bus_dmamap_sync(fl->ifl_ifdi->idi_tag, fl->ifl_ifdi->idi_map,
+			BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 }
 
 static struct mbuf *
@@ -3089,9 +3085,11 @@ defrag:
 	print_pkt(&pi);
 #endif
 	if ((err = ctx->isc_txd_encap(ctx->ifc_softc, &pi)) == 0) {
-		bus_dmamap_sync(txq->ift_ifdi->idi_tag, txq->ift_ifdi->idi_map,
-						BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
-
+		if (map != NULL) {
+			bus_dmamap_sync(desc_tag, map, BUS_DMASYNC_PREWRITE);
+			bus_dmamap_sync(txq->ift_ifdi->idi_tag, txq->ift_ifdi->idi_map,
+					BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+		}
 		DBG_COUNTER_INC(tx_encap);
 		MPASS(pi.ipi_new_pidx >= 0 &&
 		    pi.ipi_new_pidx < txq->ift_size);
