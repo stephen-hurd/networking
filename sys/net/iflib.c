@@ -299,14 +299,15 @@ typedef struct iflib_sw_tx_desc_array {
 
 #define IFLIB_RESTART_BUDGET		8
 
-#define	IFC_LEGACY		0x01
-#define	IFC_QFLUSH		0x02
-#define	IFC_MULTISEG		0x04
-#define	IFC_DMAR		0x08
-#define	IFC_SC_ALLOCATED	0x10
-#define	IFC_INIT_DONE		0x20
-#define	IFC_PREFETCH		0x40
-#define	IFC_DO_RESET		0x80
+#define	IFC_LEGACY		0x001
+#define	IFC_QFLUSH		0x002
+#define	IFC_MULTISEG		0x004
+#define	IFC_DMAR		0x008
+#define	IFC_SC_ALLOCATED	0x010
+#define	IFC_INIT_DONE		0x020
+#define	IFC_PREFETCH		0x040
+#define	IFC_DO_RESET		0x080
+#define	IFC_CHECK_HUNG		0x100
 
 #define CSUM_OFFLOAD		(CSUM_IP_TSO|CSUM_IP6_TSO|CSUM_IP| \
 				 CSUM_IP_UDP|CSUM_IP_TCP|CSUM_IP_SCTP| \
@@ -325,6 +326,7 @@ struct iflib_txq {
 	uint8_t		ift_txd_size[8];
 	uint64_t	ift_processed;
 	uint64_t	ift_cleaned;
+	uint64_t	ift_cleaned_prev;
 #if MEMORY_LOGGING
 	uint64_t	ift_enqueued;
 	uint64_t	ift_dequeued;
@@ -2072,9 +2074,13 @@ iflib_timer(void *arg)
 	*/
 	IFDI_TIMER(ctx, txq->ift_id);
 	if ((txq->ift_qstatus == IFLIB_QUEUE_HUNG) &&
-		(ctx->ifc_pause_frames == 0))
+	    ((txq->ift_cleaned_prev == txq->ift_cleaned) ||
+	     (ctx->ifc_pause_frames == 0)))
 		goto hung;
 
+	if (ifmp_ring_is_stalled(txq->ift_br))
+		txq->ift_qstatus = IFLIB_QUEUE_HUNG;
+	txq->ift_cleaned_prev = txq->ift_cleaned;
 	/* handle any laggards */
 	if (txq->ift_db_pending)
 		GROUPTASK_ENQUEUE(&txq->ift_task);
@@ -3302,6 +3308,8 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		DBG_COUNTER_INC(txq_drain_oactive);
 		return (0);
 	}
+	if (reclaimed)
+		txq->ift_qstatus = IFLIB_QUEUE_IDLE;
 	consumed = mcast_sent = bytes_sent = pkt_sent = 0;
 	count = MIN(avail, TX_BATCH_SIZE);
 #ifdef INVARIANTS
@@ -3349,6 +3357,7 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 			break;
 		rang = iflib_txd_db_check(ctx, txq, false, in_use_prev);
 	}
+
 	/* deliberate use of bitwise or to avoid gratuitous short-circuit */
 	ring = rang ? false  : (iflib_min_tx_latency | err) || (TXQ_AVAIL(txq) < MAX_TX_DESC(ctx));
 	iflib_txd_db_check(ctx, txq, ring, txq->ift_in_use);
