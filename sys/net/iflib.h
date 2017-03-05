@@ -266,8 +266,9 @@ typedef struct iflib_dma_info {
 #define IFLIB_MAGIC 0xCAFEF00D
 
 typedef enum {
-	IFLIB_INTR_TX,
 	IFLIB_INTR_RX,
+	IFLIB_INTR_TX,
+	IFLIB_INTR_RXTX,
 	IFLIB_INTR_ADMIN,
 	IFLIB_INTR_IOV,
 } iflib_intr_type_t;

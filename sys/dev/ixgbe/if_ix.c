@@ -2006,7 +2006,7 @@ ixgbe_if_msix_intr_assign(if_ctx_t ctx, int msix)
 		rid = vector + 1;
 
 		snprintf(buf, sizeof(buf), "rxq%d", i);
-		error = iflib_irq_alloc_generic(ctx, &rx_que->que_irq, rid, IFLIB_INTR_RX,
+		error = iflib_irq_alloc_generic(ctx, &rx_que->que_irq, rid, IFLIB_INTR_RXTX,
 										ixgbe_msix_que, rx_que, rx_que->rxr.me, buf);
 
 		if (error) {

@@ -1361,6 +1361,22 @@ SYSINIT(iflib_record_started, SI_SUB_SMP + 1, SI_ORDER_FIRST,
 #endif
 
 static int
+iflib_fast_intr(void *arg)
+{
+	iflib_filter_info_t info = arg;
+	struct grouptask *gtask = info->ifi_task;
+	if (!iflib_started)
+		return (FILTER_HANDLED);
+
+	DBG_COUNTER_INC(fast_intrs);
+	if (info->ifi_filter != NULL && info->ifi_filter(info->ifi_filter_arg) == FILTER_HANDLED)
+		return (FILTER_HANDLED);
+
+	GROUPTASK_ENQUEUE(gtask);
+	return (FILTER_HANDLED);
+}
+
+static int
 iflib_fast_intr_rxtx(void *arg)
 {
 	iflib_filter_info_t info = arg;
@@ -1397,6 +1413,7 @@ iflib_fast_intr_rxtx(void *arg)
 		IFDI_RX_QUEUE_INTR_ENABLE(ctx, rxq->ifr_id);
 	return (FILTER_HANDLED);
 }
+
 
 static int
 iflib_fast_intr_ctx(void *arg)
@@ -4854,10 +4871,19 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 		gtask = &ctx->ifc_txqs[qid].ift_task;
 		tqg = qgroup_if_io_tqg;
 		fn = _task_fn_tx;
-		intr_fast = iflib_fast_intr_rxtx;
+		intr_fast = iflib_fast_intr;
 		GROUPTASK_INIT(gtask, 0, fn, q);
 		break;
 	case IFLIB_INTR_RX:
+		q = &ctx->ifc_rxqs[qid];
+		info = &ctx->ifc_rxqs[qid].ifr_filter_info;
+		gtask = &ctx->ifc_rxqs[qid].ifr_task;
+		tqg = qgroup_if_io_tqg;
+		fn = _task_fn_rx;
+		intr_fast = iflib_fast_intr;
+		GROUPTASK_INIT(gtask, 0, fn, q);
+		break;
+	case IFLIB_INTR_RXTX:
 		q = &ctx->ifc_rxqs[qid];
 		info = &ctx->ifc_rxqs[qid].ifr_filter_info;
 		gtask = &ctx->ifc_rxqs[qid].ifr_task;
