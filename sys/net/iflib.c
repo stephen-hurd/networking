@@ -1210,7 +1210,7 @@ iflib_netmap_rxq_init(if_ctx_t ctx, iflib_rxq_t rxq)
 
 #define iflib_netmap_attach(ctx) (0)
 #define netmap_rx_irq(ifp, qid, budget) (0)
-#define netmap_tx_irq(ifp, qid) (0)
+#define netmap_tx_irq(ifp, qid) do {} while (0)
 
 #endif
 
@@ -3121,8 +3121,7 @@ defrag:
 					BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 		}
 		DBG_COUNTER_INC(tx_encap);
-		MPASS(pi.ipi_new_pidx >= 0 &&
-		    pi.ipi_new_pidx < txq->ift_size);
+		MPASS(pi.ipi_new_pidx < txq->ift_size);
 
 		ndesc = pi.ipi_new_pidx - pi.ipi_pidx;
 		if (pi.ipi_new_pidx < pi.ipi_pidx) {
