@@ -306,7 +306,7 @@ typedef struct iflib_sw_tx_desc_array {
 #define	IFC_SC_ALLOCATED	0x10
 #define	IFC_INIT_DONE		0x20
 #define	IFC_PREFETCH		0x40
-
+#define	IFC_DO_RESET		0x80
 
 #define CSUM_OFFLOAD		(CSUM_IP_TSO|CSUM_IP6_TSO|CSUM_IP| \
 				 CSUM_IP_UDP|CSUM_IP_TCP|CSUM_IP_SCTP| \
@@ -705,6 +705,7 @@ static void iflib_add_device_sysctl_post(if_ctx_t ctx);
 static void iflib_ifmp_purge(iflib_txq_t txq);
 static void _iflib_pre_assert(if_softc_ctx_t scctx);
 static void iflib_stop(if_ctx_t ctx);
+static void iflib_if_init_locked(if_ctx_t ctx);
 
 #ifdef DEV_NETMAP
 #include <sys/selinfo.h>
@@ -2463,8 +2464,8 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 		ri.iri_frags = rxq->ifr_frags;
 		err = ctx->isc_rxd_pkt_get(ctx->ifc_softc, &ri);
 
-		/* in lieu of handling correctly - make sure it isn't being unhandled */
-		MPASS(err == 0);
+		if (err)
+			goto err;
 		if (sctx->isc_flags & IFLIB_HAS_RXCQ) {
 			*cidxp = ri.iri_cidx;
 			/* Update our consumer index */
@@ -2528,6 +2529,12 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 	if (avail)
 		return true;
 	return (iflib_rxd_avail(ctx, rxq, *cidxp, 1));
+err:
+	CTX_LOCK(ctx);
+	ctx->ifc_flags |= IFC_DO_RESET;
+	iflib_admin_intr_deferred(ctx);
+	CTX_UNLOCK(ctx);
+	return (false);
 }
 
 #define TXD_NOTIFY_COUNT(txq) (((txq)->ift_size / (txq)->ift_update_freq)-1)
@@ -3483,6 +3490,10 @@ _task_fn_admin(void *context)
 	for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_ntxqsets; i++, txq++)
 		callout_reset_on(&txq->ift_timer, hz/2, iflib_timer, txq, txq->ift_timer.c_cpu);
 	IFDI_LINK_INTR_ENABLE(ctx);
+	if (ctx->ifc_flags & IFC_DO_RESET) {
+		ctx->ifc_flags &= ~IFC_DO_RESET;
+		iflib_if_init_locked(ctx);
+	}
 	CTX_UNLOCK(ctx);
 
 	if (LINK_ACTIVE(ctx) == 0)
@@ -4970,7 +4981,7 @@ iflib_led_create(if_ctx_t ctx)
 {
 
 	ctx->ifc_led_dev = led_create(iflib_led_func, ctx,
-								  device_get_nameunit(ctx->ifc_dev));
+	    device_get_nameunit(ctx->ifc_dev));
 }
 
 void
