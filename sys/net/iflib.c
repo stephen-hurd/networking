@@ -4064,7 +4064,7 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 #ifdef ACPI_DMAR
 	if (dmar_get_dma_tag(device_get_parent(dev), dev) != NULL)
 		ctx->ifc_flags |= IFC_DMAR;
-#elif !defined(__i386__) || !defined(__amd64__)
+#elif !(defined(__i386__) || defined(__amd64__))
 	/* set unconditionally for !x86 */
 	ctx->ifc_flags |= IFC_DMAR;
 #endif
