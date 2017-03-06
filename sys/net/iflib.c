@@ -1543,7 +1543,7 @@ iflib_txsd_alloc(iflib_txq_t txq)
 	}
 
         /* Create the descriptor buffer dma maps */
-#if defined(ACPI_DMAR) || (!(defined(__i386__) && !defined(__amd64__)))
+#if defined(ACPI_DMAR) || (! (defined(__i386__) || defined(__amd64__)))
 	if ((ctx->ifc_flags & IFC_DMAR) == 0)
 		return (0);
 
@@ -1726,7 +1726,7 @@ iflib_rxsd_alloc(iflib_rxq_t rxq)
 		}
 
 		/* Create the descriptor buffer dma maps */
-#if defined(ACPI_DMAR) || (!(defined(__i386__) && !defined(__amd64__)))
+#if defined(ACPI_DMAR) || (! (defined(__i386__) || defined(__amd64__)))
 		if ((ctx->ifc_flags & IFC_DMAR) == 0)
 			continue;
 
@@ -1863,6 +1863,8 @@ _iflib_fl_refill(if_ctx_t ctx, iflib_fl_t fl, int count)
 
 			cb_arg.error = 0;
 			q = fl->ifl_rxq;
+			MPASS(sd_map != NULL);
+			MPASS(sd_map[idx] != NULL);
 			err = bus_dmamap_load(fl->ifl_desc_tag, sd_map[idx],
 		         cl, fl->ifl_buf_size, _rxq_refill_cb, &cb_arg, 0);
 			bus_dmamap_sync(fl->ifl_desc_tag, sd_map[idx], BUS_DMASYNC_PREREAD);
@@ -4063,7 +4065,7 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 #ifdef ACPI_DMAR
 	if (dmar_get_dma_tag(device_get_parent(dev), dev) != NULL)
 		ctx->ifc_flags |= IFC_DMAR;
-#elif !defined(__i386__) || !defined(__amd64__)
+#elif !(defined(__i386__) || defined(__amd64__))
 	/* set unconditionally for !x86 */
 	ctx->ifc_flags |= IFC_DMAR;
 #endif
