@@ -1366,12 +1366,7 @@ iflib_fast_intr_rxtx(void *arg)
 			continue;
 		GROUPTASK_ENQUEUE(&ctx->ifc_txqs[txqid].ift_task);
 	}
-	if (ctx->ifc_sctx->isc_flags & IFLIB_HAS_RXCQ)
-		cidx = rxq->ifr_cq_cidx;
-	else
-		cidx = rxq->ifr_fl[0].ifl_cidx;
-	if (iflib_rxd_avail(ctx, rxq, cidx, 1))
-		GROUPTASK_ENQUEUE(gtask);
+	GROUPTASK_ENQUEUE(gtask);
 	return (FILTER_HANDLED);
 }
 
