@@ -1214,7 +1214,7 @@ iflib_netmap_rxq_init(if_ctx_t ctx, iflib_rxq_t rxq)
 
 #define iflib_netmap_attach(ctx) (0)
 #define netmap_rx_irq(ifp, qid, budget) (0)
-#define netmap_tx_irq(ifp, qid) (0)
+#define netmap_tx_irq(ifp, qid) do {} while (0)
 
 #endif
 
@@ -1547,7 +1547,7 @@ iflib_txsd_alloc(iflib_txq_t txq)
 	}
 
         /* Create the descriptor buffer dma maps */
-#if defined(ACPI_DMAR) || (!(defined(__i386__) && !defined(__amd64__)))
+#if defined(ACPI_DMAR) || (! (defined(__i386__) || defined(__amd64__)))
 	if ((ctx->ifc_flags & IFC_DMAR) == 0)
 		return (0);
 
@@ -1730,7 +1730,7 @@ iflib_rxsd_alloc(iflib_rxq_t rxq)
 		}
 
 		/* Create the descriptor buffer dma maps */
-#if defined(ACPI_DMAR) || (!(defined(__i386__) && !defined(__amd64__)))
+#if defined(ACPI_DMAR) || (! (defined(__i386__) || defined(__amd64__)))
 		if ((ctx->ifc_flags & IFC_DMAR) == 0)
 			continue;
 
@@ -1867,6 +1867,8 @@ _iflib_fl_refill(if_ctx_t ctx, iflib_fl_t fl, int count)
 
 			cb_arg.error = 0;
 			q = fl->ifl_rxq;
+			MPASS(sd_map != NULL);
+			MPASS(sd_map[idx] != NULL);
 			err = bus_dmamap_load(fl->ifl_desc_tag, sd_map[idx],
 		         cl, fl->ifl_buf_size, _rxq_refill_cb, &cb_arg, 0);
 			bus_dmamap_sync(fl->ifl_desc_tag, sd_map[idx], BUS_DMASYNC_PREREAD);
@@ -3133,8 +3135,7 @@ defrag:
 					BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 		}
 		DBG_COUNTER_INC(tx_encap);
-		MPASS(pi.ipi_new_pidx >= 0 &&
-		    pi.ipi_new_pidx < txq->ift_size);
+		MPASS(pi.ipi_new_pidx < txq->ift_size);
 
 		ndesc = pi.ipi_new_pidx - pi.ipi_pidx;
 		if (pi.ipi_new_pidx < pi.ipi_pidx) {
