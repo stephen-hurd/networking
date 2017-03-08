@@ -93,8 +93,6 @@ __FBSDID("$FreeBSD: head/sys/net/iflib.c 302439 2016-07-08 17:04:21Z cem $");
 #include <x86/iommu/busdma_dmar.h>
 #endif
 
-#undef __NO_STRICT_ALIGNMENT
-
 /*
  * enable accounting of every mbuf as it comes in to and goes out of
  * iflib's software descriptor references
@@ -2419,10 +2417,10 @@ iflib_rxd_pkt_get(iflib_rxq_t rxq, if_rxd_info_t ri)
 		m = *sd.ifsd_m;
 		*sd.ifsd_m = NULL;
 		m_init(m, M_NOWAIT, MT_DATA, M_PKTHDR);
-#ifndef __NO_STRICT_ALIGNMENT		
+#ifndef __NO_STRICT_ALIGNMENT
 		if (!IP_ALIGNED(m))
 			m->m_data += 2;
-#endif		
+#endif
 		memcpy(m->m_data, *sd.ifsd_cl, ri->iri_len);
 		m->m_len = ri->iri_frags[0].irf_len;
        } else {
