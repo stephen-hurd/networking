@@ -302,6 +302,10 @@ typedef enum {
  * Interface doesn't expect in_pseudo for th_sum
  */
 #define IFLIB_TSO_INIT_IP	0x20
+/*
+ * Interface doesn't align IP header
+ */
+#define IFLIB_DO_RX_FIXUP	0x40
 
 
 

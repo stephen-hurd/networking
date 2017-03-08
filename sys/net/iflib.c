@@ -93,6 +93,8 @@ __FBSDID("$FreeBSD: head/sys/net/iflib.c 302439 2016-07-08 17:04:21Z cem $");
 #include <x86/iommu/busdma_dmar.h>
 #endif
 
+#undef __NO_STRICT_ALIGNMENT
+
 /*
  * enable accounting of every mbuf as it comes in to and goes out of
  * iflib's software descriptor references
@@ -255,6 +257,7 @@ iflib_get_sctx(if_ctx_t ctx)
 	return (ctx->ifc_sctx);
 }
 
+#define IP_ALIGNED(m) ((((uintptr_t)(m)->m_data) & 0x3) == 0x2)
 #define CACHE_PTR_INCREMENT (CACHE_LINE_SIZE/sizeof(void*))
 #define CACHE_PTR_NEXT(ptr) ((void *)(((vm_paddr_t)(ptr)+CACHE_LINE_SIZE-1) & (CACHE_LINE_SIZE-1)))
 
@@ -708,6 +711,9 @@ static void iflib_ifmp_purge(iflib_txq_t txq);
 static void _iflib_pre_assert(if_softc_ctx_t scctx);
 static void iflib_stop(if_ctx_t ctx);
 static void iflib_if_init_locked(if_ctx_t ctx);
+#ifndef __NO_STRICT_ALIGNMENT
+static struct mbuf * iflib_fixup_rx(struct mbuf *m);
+#endif
 
 #ifdef DEV_NETMAP
 #include <sys/selinfo.h>
@@ -2413,6 +2419,10 @@ iflib_rxd_pkt_get(iflib_rxq_t rxq, if_rxd_info_t ri)
 		m = *sd.ifsd_m;
 		*sd.ifsd_m = NULL;
 		m_init(m, M_NOWAIT, MT_DATA, M_PKTHDR);
+#ifndef __NO_STRICT_ALIGNMENT		
+		if (!IP_ALIGNED(m))
+			m->m_data += 2;
+#endif		
 		memcpy(m->m_data, *sd.ifsd_cl, ri->iri_len);
 		m->m_len = ri->iri_frags[0].irf_len;
        } else {
@@ -2530,6 +2540,10 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 		m = mh;
 		mh = mh->m_nextpkt;
 		m->m_nextpkt = NULL;
+#ifndef __NO_STRICT_ALIGNMENT
+		if (!IP_ALIGNED(m) && (m = iflib_fixup_rx(m)) == NULL)
+			continue;
+#endif
 		rx_bytes += m->m_pkthdr.len;
 		rx_pkts++;
 #if defined(INET6) || defined(INET)
@@ -5576,3 +5590,30 @@ iflib_add_device_sysctl_post(if_ctx_t ctx)
 	}
 
 }
+
+#ifndef __NO_STRICT_ALIGNMENT
+static struct mbuf *
+iflib_fixup_rx(struct mbuf *m)
+{
+	struct mbuf *n;
+
+	if (m->m_len <= (MCLBYTES - ETHER_HDR_LEN)) {
+		bcopy(m->m_data, m->m_data + ETHER_HDR_LEN, m->m_len);
+		m->m_data += ETHER_HDR_LEN;
+		n = m;
+	} else {
+		MGETHDR(n, M_NOWAIT, MT_DATA);
+		if (n == NULL) {
+			m_freem(m);
+			return (NULL);
+		}
+		bcopy(m->m_data, n->m_data, ETHER_HDR_LEN);
+		m->m_data += ETHER_HDR_LEN;
+		m->m_len -= ETHER_HDR_LEN;
+		n->m_len = ETHER_HDR_LEN;
+		M_MOVE_PKTHDR(n, m);
+		n->m_next = m;
+	}
+	return (n);
+}
+#endif
