@@ -3031,11 +3031,11 @@ iflib_encap(iflib_txq_t txq, struct mbuf **m_headp)
 		prefetch(&txq->ift_sds.ifsd_m[next]);
 		if (txq->ift_sds.ifsd_map != NULL) {
 			prefetch(&txq->ift_sds.ifsd_map[next]);
-			map = txq->ift_sds.ifsd_map[pidx];
 			next = (cidx + CACHE_LINE_SIZE) & (ntxd-1);
 			prefetch(&txq->ift_sds.ifsd_flags[next]);
 		}
-	}
+	} else if (txq->ift_sds.ifsd_map != NULL)
+		map = txq->ift_sds.ifsd_map[pidx];
 
 	if (m_head->m_pkthdr.csum_flags & CSUM_TSO) {
 		desc_tag = txq->ift_tso_desc_tag;
@@ -3128,12 +3128,12 @@ defrag:
 #ifdef PKT_DEBUG
 	print_pkt(&pi);
 #endif
+	if (map != NULL)
+		bus_dmamap_sync(desc_tag, map, BUS_DMASYNC_PREWRITE);
 	if ((err = ctx->isc_txd_encap(ctx->ifc_softc, &pi)) == 0) {
-		if (map != NULL) {
-			bus_dmamap_sync(desc_tag, map, BUS_DMASYNC_PREWRITE);
+		if (map != NULL)
 			bus_dmamap_sync(txq->ift_ifdi->idi_tag, txq->ift_ifdi->idi_map,
 					BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
-		}
 		DBG_COUNTER_INC(tx_encap);
 		MPASS(pi.ipi_new_pidx < txq->ift_size);
 
