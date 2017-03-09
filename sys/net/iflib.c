@@ -3377,8 +3377,8 @@ iflib_txq_drain(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 		m = *mp;
 		DBG_COUNTER_INC(tx_sent);
 		bytes_sent += m->m_pkthdr.len;
-		if (m->m_flags & M_MCAST)
-			mcast_sent++;
+		mcast_sent += !!(m->m_flags & M_MCAST);
+		avail = TXQ_AVAIL(txq);
 
 		txq->ift_db_pending += (txq->ift_in_use - in_use_prev);
 		desc_used += (txq->ift_in_use - in_use_prev);
