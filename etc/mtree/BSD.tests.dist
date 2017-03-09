@@ -22,6 +22,8 @@
         ..
         pkill
         ..
+        pwait
+        ..
         sh
             builtins
             ..
@@ -619,6 +621,8 @@
         gzip
         ..
         ident
+        ..
+        indent
         ..
         join
         ..
