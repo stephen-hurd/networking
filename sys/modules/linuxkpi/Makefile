@@ -1,5 +1,5 @@
 # $FreeBSD$
-.PATH:	${.CURDIR}/../../compat/linuxkpi/common/src
+.PATH:	${SRCTOP}/sys/compat/linuxkpi/common/src
 
 KMOD=	linuxkpi
 SRCS=	linux_kmod.c \
@@ -10,9 +10,11 @@ SRCS=	linux_kmod.c \
 	linux_pci.c \
 	linux_radix.c \
 	linux_rcu.c \
+	linux_slab.c \
 	linux_tasklet.c \
 	linux_idr.c \
-	linux_usb.c
+	linux_usb.c \
+	linux_work.c
 
 SRCS+=	bus_if.h \
 	device_if.h \
@@ -21,7 +23,7 @@ SRCS+=	bus_if.h \
 	usb_if.h \
 	opt_usb.h
 
-CFLAGS+= -I${.CURDIR}/../../compat/linuxkpi/common/include
-CFLAGS+= -I${.CURDIR}/../../contrib/ck/include
+CFLAGS+= -I${SRCTOP}/sys/compat/linuxkpi/common/include
+CFLAGS+= -I${SRCTOP}/sys/contrib/ck/include
 
 .include <bsd.kmod.mk>
