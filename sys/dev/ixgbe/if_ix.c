@@ -3941,8 +3941,8 @@ ixgbe_disable_queue(struct adapter *adapter, u32 vector)
 int
 ixgbe_intr(void *arg)
 {
-	struct ix_rx_queue *que = arg;
-	struct adapter *adapter = que->adapter;
+	struct adapter *adapter = arg;
+	struct ix_rx_queue *que = adapter->rx_queues;
 	struct ixgbe_hw *hw = &adapter->hw;
 	if_ctx_t ctx = adapter->ctx;
 	u32 reg_eicr;
