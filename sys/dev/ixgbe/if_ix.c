@@ -203,9 +203,6 @@ static int ixgbe_sysctl_eee_rx_lpi_status(SYSCTL_HANDLER_ARGS);
 static int ixgbe_sysctl_eee_tx_lpi_status(SYSCTL_HANDLER_ARGS);
 static int ixgbe_sysctl_eee_tx_lpi_delay(SYSCTL_HANDLER_ARGS);
 
-/* Support for pluggable optic modules */
-static void	ixgbe_setup_optics(struct adapter *);
-
 /* Deferred interrupt tasklets */
 static void	ixgbe_handle_msf(void *);
 static void	ixgbe_handle_mod(void *);
