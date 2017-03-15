@@ -257,7 +257,7 @@ iflib_get_sctx(if_ctx_t ctx)
 
 #define IP_ALIGNED(m) ((((uintptr_t)(m)->m_data) & 0x3) == 0x2)
 #define CACHE_PTR_INCREMENT (CACHE_LINE_SIZE/sizeof(void*))
-#define CACHE_PTR_NEXT(ptr) ((void *)(((vm_paddr_t)(ptr)+CACHE_LINE_SIZE-1) & (CACHE_LINE_SIZE-1)))
+#define CACHE_PTR_NEXT(ptr) ((void *)(((uintptr_t)(ptr)+CACHE_LINE_SIZE-1) & (CACHE_LINE_SIZE-1)))
 
 #define LINK_ACTIVE(ctx) ((ctx)->ifc_link_state == LINK_STATE_UP)
 #define CTX_IS_VF(ctx) ((ctx)->ifc_sctx->isc_flags & IFLIB_IS_VF)
@@ -860,7 +860,7 @@ iflib_netmap_txsync(struct netmap_kring *kring, int flags)
 		for (n = 0; nm_i != head; n++) {
 			struct netmap_slot *slot = &ring->slot[nm_i];
 			u_int len = slot->len;
-			vm_paddr_t paddr;
+			uint64_t paddr;
 			void *addr = PNMB(na, slot, &paddr);
 			int flags = (slot->flags & NS_REPORT ||
 				nic_i == 0 || nic_i == report_frequency) ?
