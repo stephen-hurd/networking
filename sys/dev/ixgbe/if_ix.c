@@ -203,9 +203,6 @@ static int ixgbe_sysctl_eee_rx_lpi_status(SYSCTL_HANDLER_ARGS);
 static int ixgbe_sysctl_eee_tx_lpi_status(SYSCTL_HANDLER_ARGS);
 static int ixgbe_sysctl_eee_tx_lpi_delay(SYSCTL_HANDLER_ARGS);
 
-/* Support for pluggable optic modules */
-static void	ixgbe_setup_optics(struct adapter *);
-
 /* Deferred interrupt tasklets */
 static void	ixgbe_handle_msf(void *);
 static void	ixgbe_handle_mod(void *);
@@ -3941,8 +3938,8 @@ ixgbe_disable_queue(struct adapter *adapter, u32 vector)
 int
 ixgbe_intr(void *arg)
 {
-	struct ix_rx_queue *que = arg;
-	struct adapter *adapter = que->adapter;
+	struct adapter *adapter = arg;
+	struct ix_rx_queue *que = adapter->rx_queues;
 	struct ixgbe_hw *hw = &adapter->hw;
 	if_ctx_t ctx = adapter->ctx;
 	u32 reg_eicr;
