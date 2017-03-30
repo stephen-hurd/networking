@@ -310,6 +310,8 @@
             ttyio
             ..
         ..
+        libcam
+        ..
         libcasper
             services
                 cap_dns
@@ -325,6 +327,8 @@
         libcrypt
         ..
         libdevdctl
+        ..
+        libkvm
         ..
         libmp
         ..
