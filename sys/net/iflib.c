@@ -1970,8 +1970,10 @@ iflib_fl_bufs_free(iflib_fl_t fl)
 			MPASS(*sd_m == NULL);
 		}
 #if MEMORY_LOGGING
-		fl->ifl_m_dequeued++;
-		fl->ifl_cl_dequeued++;
+		if (*sd_m != NULL)
+			fl->ifl_m_dequeued++;
+		if (*sd_cl != NULL)
+			fl->ifl_cl_dequeued++;
 #endif
 		*sd_cl = NULL;
 		*sd_m = NULL;
@@ -2391,6 +2393,9 @@ assemble_segments(iflib_rxq_t rxq, if_rxd_info_t ri, if_rxsd_t sd)
 		}
 		cl = *sd->ifsd_cl;
 		*sd->ifsd_cl = NULL;
+#if MEMORY_LOGGING
+		sd->ifsd_fl->ifl_cl_dequeued++;
+#endif
 
 		/* Can these two be made one ? */
 		m_init(m, M_NOWAIT, MT_DATA, flags);
