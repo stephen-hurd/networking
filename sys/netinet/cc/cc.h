@@ -81,6 +81,7 @@ struct cc_var {
 	int		bytes_this_ack; /* # bytes acked by the current ACK. */
 	tcp_seq		curack; /* Most recent ACK. */
 	uint32_t	flags; /* Flags for cc_var (see below) */
+	int32_t		sample_rtt_us; /* RTT as measured by this ack in us*/
 	int		type; /* Indicates which ptr is valid in ccvc. */
 	union ccv_container {
 		struct tcpcb		*tcp;

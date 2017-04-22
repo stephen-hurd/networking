@@ -301,9 +301,10 @@ hhook_run_tcp_est_in(struct tcpcb *tp, struct tcphdr *th, struct tcpopt *to)
  * CC wrapper hook functions
  */
 void
-cc_ack_received(struct tcpcb *tp, struct tcphdr *th, uint16_t nsegs,
-    uint16_t type)
+cc_ack_received(struct tcpcb *tp, struct tcphdr *th, struct tcpopt *to,
+    uint16_t nsegs, uint16_t type)
 {
+	int ts;
 	INP_WLOCK_ASSERT(tp->t_inpcb);
 
 	tp->ccv->nsegs = nsegs;
@@ -330,6 +331,11 @@ cc_ack_received(struct tcpcb *tp, struct tcphdr *th, uint16_t nsegs,
 	if (CC_ALGO(tp)->ack_received != NULL) {
 		/* XXXLAS: Find a way to live without this */
 		tp->ccv->curack = th->th_ack;
+		ts = tcp_ts_getticks();
+		if (to->to_tsecr && TSTMP_LT(to->to_tsecr, ts))
+			tp->ccv->sample_rtt_us = (ts - to->to_tsecr)*(1000000/*USEC_PER_SEC*//hz);
+		else
+			tp->ccv->sample_rtt_us = -1;
 		CC_ALGO(tp)->ack_received(tp->ccv, type);
 	}
 }
@@ -1847,7 +1853,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 				 * typically means increasing the congestion
 				 * window.
 				 */
-				cc_ack_received(tp, th, nsegs, CC_ACK);
+				cc_ack_received(tp, th, &to, nsegs, CC_ACK);
 
 				tp->snd_una = th->th_ack;
 				/*
@@ -2588,7 +2594,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 					tp->t_dupacks = 0;
 				else if (++tp->t_dupacks > tcprexmtthresh ||
 				     IN_FASTRECOVERY(tp->t_flags)) {
-					cc_ack_received(tp, th, nsegs,
+					cc_ack_received(tp, th, &to, nsegs,
 					    CC_DUPACK);
 					if ((tp->t_flags & TF_SACK_PERMIT) &&
 					    IN_FASTRECOVERY(tp->t_flags)) {
@@ -2648,7 +2654,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 					}
 					/* Congestion signal before ack. */
 					cc_cong_signal(tp, th, CC_NDUPACK);
-					cc_ack_received(tp, th, nsegs,
+					cc_ack_received(tp, th, &to, nsegs,
 					    CC_DUPACK);
 					tcp_timer_activate(tp, TT_REXMT, 0);
 					tp->t_rtttime = 0;
@@ -2686,7 +2692,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 					 * segment. Restore the original
 					 * snd_cwnd after packet transmission.
 					 */
-					cc_ack_received(tp, th, nsegs,
+					cc_ack_received(tp, th, &to, nsegs,
 					    CC_DUPACK);
 					uint32_t oldcwnd = tp->snd_cwnd;
 					tcp_seq oldsndmax = tp->snd_max;
@@ -2854,7 +2860,7 @@ process_ACK:
 		 * control related information. This typically means increasing
 		 * the congestion window.
 		 */
-		cc_ack_received(tp, th, nsegs, CC_ACK);
+		cc_ack_received(tp, th, &to, nsegs, CC_ACK);
 
 		SOCKBUF_LOCK(&so->so_snd);
 		if (acked > sbavail(&so->so_snd)) {
