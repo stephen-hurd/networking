@@ -38,6 +38,8 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
+# 20170420: remove GNU diff
+OLD_FILES+=usr/share/man/man7/diff.7.gz
 # 20170322: rename <x> to <x>_test to match the FreeBSD test suite name scheme
 OLD_FILES+=usr/tests/usr.bin/col/col
 OLD_FILES+=usr/tests/usr.bin/diff/diff
@@ -45,16 +47,16 @@ OLD_FILES+=usr/tests/usr.bin/ident/ident
 OLD_FILES+=usr/tests/usr.bin/mkimg/mkimg
 OLD_FILES+=usr/tests/usr.bin/sdiff/sdiff
 OLD_FILES+=usr/tests/usr.bin/soelim/soelim
-OLD_FILES+=usr/tests/usr.sbin/pw/pw_config_test
-OLD_FILES+=usr/tests/usr.sbin/pw/pw_etcdir_test
-OLD_FILES+=usr/tests/usr.sbin/pw/pw_lock_test
-OLD_FILES+=usr/tests/usr.sbin/pw/pw_groupadd_test
-OLD_FILES+=usr/tests/usr.sbin/pw/pw_groupdel_test
-OLD_FILES+=usr/tests/usr.sbin/pw/pw_groupmod_test
-OLD_FILES+=usr/tests/usr.sbin/pw/pw_useradd_test
-OLD_FILES+=usr/tests/usr.sbin/pw/pw_userdel_test
-OLD_FILES+=usr/tests/usr.sbin/pw/pw_usermod_test
-OLD_FILES+=usr/tests/usr.sbin/pw/pw_usernext_test
+OLD_FILES+=usr/tests/usr.sbin/pw/pw_config
+OLD_FILES+=usr/tests/usr.sbin/pw/pw_etcdir
+OLD_FILES+=usr/tests/usr.sbin/pw/pw_groupadd
+OLD_FILES+=usr/tests/usr.sbin/pw/pw_groupdel
+OLD_FILES+=usr/tests/usr.sbin/pw/pw_groupmod
+OLD_FILES+=usr/tests/usr.sbin/pw/pw_lock
+OLD_FILES+=usr/tests/usr.sbin/pw/pw_useradd
+OLD_FILES+=usr/tests/usr.sbin/pw/pw_userdel
+OLD_FILES+=usr/tests/usr.sbin/pw/pw_usermod
+OLD_FILES+=usr/tests/usr.sbin/pw/pw_usernext
 # 20170322: garbage collect old references to igb(4)
 OLD_FILES+=usr/share/man/man4/if_igb.4.gz
 OLD_FILES+=usr/share/man/man4/igb.4.gz
@@ -63,14 +65,6 @@ OLD_FILES+=usr/tests/lib/libc/locale/io_test
 # 20170319: remove nls for non supported Big5* locales
 OLD_DIRS+=usr/share/nls/zh_HK.Big5HKSCS
 OLD_DIRS+=usr/share/nls/zh_TW.Big5
-# 20170319: Remove zh_TW.Big5
-OLD_FILES+=usr/share/locale/zh_TW.Big5/LC_COLLATE
-OLD_FILES+=usr/share/locale/zh_TW.Big5/LC_CTYPE
-OLD_FILES+=usr/share/locale/zh_TW.Big5/LC_MESSAGES
-OLD_FILES+=usr/share/locale/zh_TW.Big5/LC_MONETARY
-OLD_FILES+=usr/share/locale/zh_TW.Big5/LC_NUMERIC
-OLD_FILES+=usr/share/locale/zh_TW.Big5/LC_TIME
-OLD_DIRS+=usr/share/locale/zh_TW.Big5
 # 20170313: move .../sys/geom/eli/... to .../sys/geom/class/eli/...
 OLD_FILES+=usr/tests/sys/geom/eli/pbkdf2/pbkdf2
 OLD_FILES+=usr/tests/sys/geom/eli/pbkdf2/Kyuafile
