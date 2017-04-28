@@ -2135,8 +2135,10 @@ iflib_init_locked(if_ctx_t ctx)
 	iflib_fl_t fl;
 	iflib_txq_t txq;
 	iflib_rxq_t rxq;
-	int i, j, tx_ip_csum_flags, tx_ip6_csum_flags;
+	int i, j, tx_ip_csum_flags, tx_ip6_csum_flags, running, reset;
 
+	running = !!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING);
+	reset = !!(ctx->ifc_flags & IFC_DO_RESET);
 
 	if_setdrvflagbits(ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
 	IFDI_INTR_DISABLE(ctx);
@@ -2169,6 +2171,8 @@ iflib_init_locked(if_ctx_t ctx)
 #endif
 	IFDI_INIT(ctx);
 	MPASS(if_getdrvflags(ifp) == i);
+	if (!running && reset)
+		return;
 	for (i = 0, rxq = ctx->ifc_rxqs; i < sctx->isc_nrxqsets; i++, rxq++) {
 		/* XXX this should really be done on a per-queue basis */
 		if (if_getcapenable(ifp) & IFCAP_NETMAP)
@@ -3514,13 +3518,9 @@ _task_fn_admin(void *context)
 	if_ctx_t ctx = context;
 	if_softc_ctx_t sctx = &ctx->ifc_softc_ctx;
 	iflib_txq_t txq;
-	int i;
+	int i, running;
 
-	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)) {
-		if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_OACTIVE)) {
-			return;
-		}
-	}
+	running = !!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING);
 
 	CTX_LOCK(ctx);
 	for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_ntxqsets; i++, txq++) {
@@ -3529,19 +3529,22 @@ _task_fn_admin(void *context)
 		CALLOUT_UNLOCK(txq);
 	}
 	IFDI_UPDATE_ADMIN_STATUS(ctx);
-	for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_ntxqsets; i++, txq++)
-		callout_reset_on(&txq->ift_timer, hz/2, iflib_timer, txq, txq->ift_timer.c_cpu);
-	IFDI_LINK_INTR_ENABLE(ctx);
+	if (running) {
+		for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_ntxqsets; i++, txq++)
+			callout_reset_on(&txq->ift_timer, hz/2, iflib_timer, txq, txq->ift_timer.c_cpu);
+		IFDI_LINK_INTR_ENABLE(ctx);
+	}
 	if (ctx->ifc_flags & IFC_DO_RESET) {
-		ctx->ifc_flags &= ~IFC_DO_RESET;
 		iflib_if_init_locked(ctx);
+		ctx->ifc_flags &= ~IFC_DO_RESET;
 	}
 	CTX_UNLOCK(ctx);
 
 	if (LINK_ACTIVE(ctx) == 0)
 		return;
-	for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_ntxqsets; i++, txq++)
-		iflib_txq_check_drain(txq, IFLIB_RESTART_BUDGET);
+	if (running)
+		for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_ntxqsets; i++, txq++)
+			iflib_txq_check_drain(txq, IFLIB_RESTART_BUDGET);
 }
 
 
@@ -5063,6 +5066,15 @@ iflib_admin_intr_deferred(if_ctx_t ctx)
 #endif
 
 	GROUPTASK_ENQUEUE(&ctx->ifc_admin_task);
+}
+
+void
+iflib_admin_reset_deferred(if_ctx_t ctx)
+{
+	CTX_LOCK(ctx);
+	ctx->ifc_flags |= IFC_DO_RESET;
+	iflib_admin_intr_deferred(ctx);
+	CTX_UNLOCK(ctx);
 }
 
 void

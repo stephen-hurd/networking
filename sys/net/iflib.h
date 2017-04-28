@@ -372,6 +372,7 @@ void iflib_tx_intr_deferred(if_ctx_t ctx, int txqid);
 void iflib_rx_intr_deferred(if_ctx_t ctx, int rxqid);
 void iflib_admin_intr_deferred(if_ctx_t ctx);
 void iflib_iov_intr_deferred(if_ctx_t ctx);
+void iflib_admin_reset_deferred(if_ctx_t ctx);
 
 
 void iflib_link_state_change(if_ctx_t ctx, int linkstate, uint64_t baudrate);
