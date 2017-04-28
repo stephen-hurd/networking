@@ -96,7 +96,57 @@ struct cubic {
 	int		epoch_ack_count;
 	/* Time of last congestion event in ticks. */
 	int		t_last_cong;
+
+	/* Hybrid Slow Start values */
+
+	/* Minimum observed rtt in ms. */
+	int		min_rtt_ms;
+	/* number of samples taken since start of packet train */
+	uint8_t		sample_count;
+	/* an early exit condition for hybrid slow start has been found */
+	uint8_t		exit_found;
+	/* start of hybrid slow start packet train */
+	uint32_t	train_start;
+	/* value of snd_nxt at reset - used to determine ack value of next reset */
+	uint32_t	end_seq;
+	/* millisecond granularity value of timestamp at the prior ack */
+	uint32_t	last_ack;
+	/* the smallest measured RTT within the first HYSTART_MIN_SAMPLES (8) */
+	uint32_t	curr_rtt;
+
+	/* assume hz == 1000 for first pass */
+	#define	min_rtt_ms	min_rtt_ticks
 };
+
+#define USEC_PER_MSEC		1000
+
+#define HYSTART_ACK_TRAIN	0x1
+#define HYSTART_DELAY		0x2
+
+#define HYSTART_MIN_SAMPLES	8
+#define HYSTART_DELAY_MIN	(4U<<3)
+#define HYSTART_DELAY_MAX	(16U<<3)
+
+static inline int
+clamp(int x, int min, int max) {
+
+	if (x < min)
+		return min;
+	if (x > max)
+		return max;
+	return x;
+}
+
+#define HYSTART_DELAY_THRESH(x)	clamp(x, HYSTART_DELAY_MIN, HYSTART_DELAY_MAX) 
+
+
+SYSCTL_NODE(_net_inet_tcp_cc, OID_AUTO, cubic, CTLFLAG_RW, NULL,
+    "cubic congestion control related settings");
+
+//static int hystart = 1;
+static int hystart_detect = HYSTART_ACK_TRAIN | HYSTART_DELAY;
+static int hystart_low_window = 16;
+static int hystart_ack_delta = 2;
 
 static MALLOC_DEFINE(M_CUBIC, "cubic data",
     "Per connection data required for the CUBIC congestion control algorithm");
@@ -201,10 +251,10 @@ cubic_cb_destroy(struct cc_var *ccv)
 static int
 cubic_cb_init(struct cc_var *ccv)
 {
-	struct cubic *cubic_data;
+	struct cubic *cubic_data = ccv->cc_data;
 
-	cubic_data = malloc(sizeof(struct cubic), M_CUBIC, M_NOWAIT|M_ZERO);
-
+	if (cubic_data == NULL)
+		cubic_data = malloc(sizeof(struct cubic), M_CUBIC, M_NOWAIT|M_ZERO);
 	if (cubic_data == NULL)
 		return (ENOMEM);
 
@@ -216,6 +266,67 @@ cubic_cb_init(struct cc_var *ccv)
 	ccv->cc_data = cubic_data;
 
 	return (0);
+}
+
+static inline uint32_t
+cubic_clock(void)
+{
+	if (hz == 1000)
+		return (ticks);
+
+	return (((ticks + hz) * 1000)/hz);
+}
+
+static void
+cubic_hystart_init(struct cc_var *ccv)
+{
+	struct cubic *cd;
+
+	cd = ccv->cc_data;
+	cd->train_start = cd->last_ack = cubic_clock();
+	cd->end_seq = CCV(ccv, snd_nxt);
+	cd->curr_rtt = 0;
+	cd->sample_count = cd->exit_found = 0;
+}
+
+static void
+cubic_hystart_update(struct cc_var *ccv, uint32_t delay)
+{
+	struct cubic *cd;
+	uint32_t now;
+
+	cd = ccv->cc_data;
+
+	if (cd->exit_found & hystart_detect)
+		return;
+
+	if (CCV(ccv, snd_cwnd) < hystart_low_window)
+		return;
+
+	if (hystart_detect & HYSTART_ACK_TRAIN) {
+		now = cubic_clock();
+		if ((int32_t)(now - cd->last_ack) <= hystart_ack_delta) {
+			cd->last_ack = now;
+			if ((int32_t)(now - cd->train_start) > cd->min_rtt_ms >> 4) {
+				cd->exit_found |= HYSTART_ACK_TRAIN;
+				CCV(ccv, snd_ssthresh) = CCV(ccv, snd_cwnd);
+
+			}
+		}
+	}
+
+	if (hystart_detect & HYSTART_DELAY) {
+		if (cd->sample_count < HYSTART_MIN_SAMPLES) {
+			if (cd->curr_rtt == 0 || cd->curr_rtt > delay)
+				cd->curr_rtt = delay;
+			cd->sample_count++;
+		} else {
+			if (cd->curr_rtt > cd->min_rtt_ms + HYSTART_DELAY_THRESH(cd->min_rtt_ms >> 3)) {
+				cd->exit_found |= HYSTART_DELAY;
+				CCV(ccv, snd_ssthresh) = CCV(ccv, snd_cwnd);
+			}
+		}
+	}
 }
 
 /*
@@ -360,10 +471,20 @@ cubic_record_rtt(struct cc_var *ccv)
 {
 	struct cubic *cubic_data;
 	int t_srtt_ticks;
+	int rtt_us, rtt_s3_ms;
+
+	cubic_data = ccv->cc_data;
+	if (ccv->sample_rtt_us >= 0) {
+		rtt_us = ccv->sample_rtt_us;
+		rtt_s3_ms = (rtt_us << 3)/USEC_PER_MSEC;
+		if (SEQ_GT(ccv->curack, cubic_data->end_seq))
+			cubic_hystart_init(ccv);
+
+		cubic_hystart_update(ccv, rtt_s3_ms);
+	}
 
 	/* Ignore srtt until a min number of samples have been taken. */
 	if (CCV(ccv, t_rttupdated) >= CUBIC_MIN_RTT_SAMPLES) {
-		cubic_data = ccv->cc_data;
 		t_srtt_ticks = CCV(ccv, t_srtt) / TCP_RTT_SCALE;
 
 		/*
