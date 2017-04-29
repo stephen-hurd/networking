@@ -166,78 +166,90 @@ static void
 cubic_ack_received(struct cc_var *ccv, uint16_t type)
 {
 	struct cubic *cubic_data;
-	unsigned long w_tf, w_cubic_next;
+	unsigned long w_tf, w_cubic_next, snd_cwnd, mss;
 	int ticks_since_cong;
 
 	cubic_data = ccv->cc_data;
 	cubic_record_rtt(ccv);
+	mss = CCV(ccv, t_maxseg);
+	snd_cwnd = CCV(ccv, snd_cwnd);
+
+	/* Regular ACK */
+	if (type != CC_ACK)
+		return;
+	/* we're not in cong/fast recovery */
+	if (IN_RECOVERY(CCV(ccv, t_flags)))
+		return;
+	/* we're cwnd limited */
+	if (!(ccv->flags & CCF_CWND_LIMITED))
+		return;
+
+	/* we are slow starting or have no minimum RTT sampled */
+	if (snd_cwnd <= CCV(ccv, snd_ssthresh) ||
+	    cubic_data->min_rtt_ticks == TCPTV_SRTTBASE) {
+		/* Use the logic in NewReno ack_received() for slow start. */
+		newreno_cc_algo.ack_received(ccv, type);
+		if (snd_cwnd < CCV(ccv, snd_ssthresh))
+			return;
+	}
 
 	/*
-	 * Regular ACK and we're not in cong/fast recovery and we're cwnd
-	 * limited and we're either not doing ABC or are slow starting or are
-	 * doing ABC and we've sent a cwnd's worth of bytes.
+	 * We're either not doing ABC or doing ABC and we've sent a cwnd's
+	 * worth of bytes
 	 */
-	if (type == CC_ACK && !IN_RECOVERY(CCV(ccv, t_flags)) &&
-	    (ccv->flags & CCF_CWND_LIMITED) && (!V_tcp_do_rfc3465 ||
-	    CCV(ccv, snd_cwnd) <= CCV(ccv, snd_ssthresh) ||
-	    (V_tcp_do_rfc3465 && ccv->flags & CCF_ABC_SENTAWND))) {
-		 /* Use the logic in NewReno ack_received() for slow start. */
-		if (CCV(ccv, snd_cwnd) <= CCV(ccv, snd_ssthresh) ||
-		    cubic_data->min_rtt_ticks == TCPTV_SRTTBASE)
-			newreno_cc_algo.ack_received(ccv, type);
-		else {
-			ticks_since_cong = ticks - cubic_data->t_last_cong;
+	if (V_tcp_do_rfc3465 && !(ccv->flags & CCF_ABC_SENTAWND))
+		return;
 
-			/*
-			 * The mean RTT is used to best reflect the equations in
-			 * the I-D. Using min_rtt in the tf_cwnd calculation
-			 * causes w_tf to grow much faster than it should if the
-			 * RTT is dominated by network buffering rather than
-			 * propagation delay.
-			 */
-			w_tf = tf_cwnd(ticks_since_cong,
-			    cubic_data->mean_rtt_ticks, cubic_data->max_cwnd,
-			    CCV(ccv, t_maxseg));
+	ticks_since_cong = ticks - cubic_data->t_last_cong;
 
-			w_cubic_next = cubic_cwnd(ticks_since_cong +
-			    cubic_data->mean_rtt_ticks, cubic_data->max_cwnd,
-			    CCV(ccv, t_maxseg), cubic_data->K);
+	/*
+	 * The mean RTT is used to best reflect the equations in
+	 * the I-D. Using min_rtt in the tf_cwnd calculation
+	 * causes w_tf to grow much faster than it should if the
+	 * RTT is dominated by network buffering rather than
+	 * propagation delay.
+	 */
+	w_tf = tf_cwnd(ticks_since_cong,
+		       cubic_data->mean_rtt_ticks, cubic_data->max_cwnd,
+		       CCV(ccv, t_maxseg));
 
-			ccv->flags &= ~CCF_ABC_SENTAWND;
+	w_cubic_next = cubic_cwnd(ticks_since_cong +
+				  cubic_data->mean_rtt_ticks, cubic_data->max_cwnd,
+				  CCV(ccv, t_maxseg), cubic_data->K);
 
-			if (w_cubic_next < w_tf)
-				/*
-				 * TCP-friendly region, follow tf
-				 * cwnd growth.
-				 */
-				CCV(ccv, snd_cwnd) = w_tf;
+	ccv->flags &= ~CCF_ABC_SENTAWND;
 
-			else if (CCV(ccv, snd_cwnd) < w_cubic_next) {
-				/*
-				 * Concave or convex region, follow CUBIC
-				 * cwnd growth.
-				 */
-				if (V_tcp_do_rfc3465)
-					CCV(ccv, snd_cwnd) = w_cubic_next;
-				else
-					CCV(ccv, snd_cwnd) += ((w_cubic_next -
-					    CCV(ccv, snd_cwnd)) *
-					    CCV(ccv, t_maxseg)) /
-					    CCV(ccv, snd_cwnd);
-			}
+	if (w_cubic_next < w_tf)
+		/*
+		 * TCP-friendly region, follow tf
+		 * cwnd growth.
+		 */
+		CCV(ccv, snd_cwnd) = w_tf;
 
-			/*
-			 * If we're not in slow start and we're probing for a
-			 * new cwnd limit at the start of a connection
-			 * (happens when hostcache has a relevant entry),
-			 * keep updating our current estimate of the
-			 * max_cwnd.
-			 */
-			if (cubic_data->num_cong_events == 0 &&
-			    cubic_data->max_cwnd < CCV(ccv, snd_cwnd))
-				cubic_data->max_cwnd = CCV(ccv, snd_cwnd);
-		}
+	else if (CCV(ccv, snd_cwnd) < w_cubic_next) {
+		/*
+		 * Concave or convex region, follow CUBIC
+		 * cwnd growth.
+		 */
+		if (V_tcp_do_rfc3465)
+			CCV(ccv, snd_cwnd) = w_cubic_next;
+		else
+			CCV(ccv, snd_cwnd) += ((w_cubic_next -
+						CCV(ccv, snd_cwnd)) *
+					       CCV(ccv, t_maxseg)) /
+				CCV(ccv, snd_cwnd);
 	}
+
+	/*
+	 * If we're not in slow start and we're probing for a
+	 * new cwnd limit at the start of a connection
+	 * (happens when hostcache has a relevant entry),
+	 * keep updating our current estimate of the
+	 * max_cwnd.
+	 */
+	if (cubic_data->num_cong_events == 0 &&
+	    cubic_data->max_cwnd < CCV(ccv, snd_cwnd))
+		cubic_data->max_cwnd = CCV(ccv, snd_cwnd);
 }
 
 static void
