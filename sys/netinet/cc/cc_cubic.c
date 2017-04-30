@@ -267,6 +267,8 @@ cubic_cb_init(struct cc_var *ccv)
 
 	if (cubic_data == NULL)
 		cubic_data = malloc(sizeof(struct cubic), M_CUBIC, M_NOWAIT|M_ZERO);
+	else
+		bzero(cubic_data, sizeof(*cubic_data));
 	if (cubic_data == NULL)
 		return (ENOMEM);
 
