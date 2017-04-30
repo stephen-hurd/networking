@@ -335,7 +335,7 @@ cc_ack_received(struct tcpcb *tp, struct tcphdr *th, struct tcpopt *to,
 		if (to->to_tsecr && TSTMP_LT(to->to_tsecr, ts))
 			tp->ccv->sample_rtt_us = (ts - to->to_tsecr)*(1000000/*USEC_PER_SEC*//hz);
 		else
-			tp->ccv->sample_rtt_us = -1;
+			tp->ccv->sample_rtt_us = 0;
 		CC_ALGO(tp)->ack_received(tp->ccv, type);
 	}
 }
