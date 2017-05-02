@@ -196,7 +196,11 @@ cubic_ack_received(struct cc_var *ccv, uint16_t type)
 	if (V_tcp_do_rfc3465 && !(ccv->flags & CCF_ABC_SENTAWND))
 		return;
 
+	if (cubic_data->t_last_cong == 0) {
+		cubic_data->t_last_cong = ticks;
+	}
 	ticks_since_cong = ticks - cubic_data->t_last_cong;
+	/* --- += min delay */
 
 	/*
 	 * The mean RTT is used to best reflect the equations in
@@ -269,7 +273,6 @@ cubic_cb_init(struct cc_var *ccv)
 		return (ENOMEM);
 
 	/* Init some key variables with sensible defaults. */
-	cubic_data->t_last_cong = ticks;
 	cubic_data->min_rtt_ms = TCPTV_SRTTBASE;
 	cubic_data->mean_rtt_ms = 1;
 
@@ -373,7 +376,6 @@ cubic_cong_signal(struct cc_var *ccv, uint32_t type)
 			cubic_data->num_cong_events++;
 			cubic_data->prev_max_cwnd = cubic_data->max_cwnd;
 			cubic_data->max_cwnd = cwin;
-			cubic_data->t_last_cong = ticks;
 			CCV(ccv, snd_cwnd) = CCV(ccv, snd_ssthresh);
 			ENTER_CONGRECOVERY(CCV(ccv, t_flags));
 		}
@@ -389,7 +391,6 @@ cubic_cong_signal(struct cc_var *ccv, uint32_t type)
 		 */
 		if (CCV(ccv, t_rxtshift) >= 2) {
 			cubic_data->num_cong_events++;
-			cubic_data->t_last_cong = ticks;
 			cubic_ssthresh_update(ccv);
 			cubic_data->max_cwnd = cwin;
 			CCV(ccv, snd_cwnd) = mss;
@@ -460,7 +461,6 @@ cubic_post_recovery(struct cc_var *ccv)
 			CCV(ccv, snd_cwnd) = max(1, ((CUBIC_BETA *
 			    cubic_data->max_cwnd) >> CUBIC_SHIFT));
 	}
-	cubic_data->t_last_cong = ticks;
 
 	/* Calculate the average RTT between congestion epochs. */
 	if (cubic_data->epoch_ack_count > 0 &&
@@ -525,6 +525,7 @@ cubic_ssthresh_update(struct cc_var *ccv)
 
 	cubic_data = ccv->cc_data;
 
+	cubic_data->t_last_cong = 0;
 	/*
 	 * On the first congestion event, set ssthresh to cwnd * 0.5, on
 	 * subsequent congestion events, set it to cwnd * beta.
