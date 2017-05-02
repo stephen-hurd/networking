@@ -171,6 +171,8 @@ cubic_cwnd(int ticks_since_cong, unsigned long wmax, uint32_t smss, int64_t K)
 
 	/* t - K, with CUBIC_SHIFT worth of precision. */
 	cwnd = ((int64_t)(ticks_since_cong << CUBIC_SHIFT) - (K * hz)) / hz;
+	if (cwnd < 0)
+		cwnd = -cwnd;
 
 	/* (t - K)^3, with CUBIC_SHIFT^3 worth of precision. */
 	cwnd *= (cwnd * cwnd);
