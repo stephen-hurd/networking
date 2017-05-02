@@ -481,50 +481,38 @@ static void
 cubic_record_rtt(struct cc_var *ccv)
 {
 	struct cubic *cubic_data;
-	int t_srtt_ms;
-	int rtt_us, rtt_s3_ms;
+	int rtt_us, rtt_s3_ms, rtt_ms;
 
 	cubic_data = ccv->cc_data;
-	if (ccv->sample_rtt_us > 0) {
-		rtt_us = ccv->sample_rtt_us;
-		rtt_s3_ms = (rtt_us << 3)/USEC_PER_MSEC;
-		if (SEQ_GT(ccv->curack, cubic_data->end_seq))
-			cubic_hystart_init(ccv);
+	if (ccv->sample_rtt_us <= 0)
+		return;
+	rtt_us = ccv->sample_rtt_us;
+	rtt_s3_ms = (rtt_us << 3)/USEC_PER_MSEC;
+	rtt_ms = max(1, rtt_us/USEC_PER_MSEC);
+	if (SEQ_GT(ccv->curack, cubic_data->end_seq))
+		cubic_hystart_init(ccv);
 
-		cubic_hystart_update(ccv, rtt_s3_ms);
-	}
+	cubic_hystart_update(ccv, rtt_s3_ms);
 
-	/* Ignore srtt until a min number of samples have been taken. */
-	if (CCV(ccv, t_rttupdated) >= CUBIC_MIN_RTT_SAMPLES) {
-		t_srtt_ms = (CCV(ccv, t_srtt)*ms_ticks_scale) / TCP_RTT_SCALE;
+	if ((rtt_ms < cubic_data->min_rtt_ms ||
+	     cubic_data->min_rtt_ms == TCPTV_SRTTBASE)) {
+		cubic_data->min_rtt_ms = rtt_ms;
 
 		/*
-		 * Record the current SRTT as our minrtt if it's the smallest
-		 * we've seen or minrtt is currently equal to its initialised
-		 * value.
-		 *
-		 * XXXLAS: Should there be some hysteresis for minrtt?
+		 * If the connection is within its first congestion
+		 * epoch, ensure we prime mean_rtt_ms with a
+		 * reasonable value until the epoch average RTT is
+		 * calculated in cubic_post_recovery().
 		 */
-		if ((t_srtt_ms < cubic_data->min_rtt_ms ||
-		    cubic_data->min_rtt_ms == TCPTV_SRTTBASE)) {
-			cubic_data->min_rtt_ms = max(1, t_srtt_ms);
-
-			/*
-			 * If the connection is within its first congestion
-			 * epoch, ensure we prime mean_rtt_ms with a
-			 * reasonable value until the epoch average RTT is
-			 * calculated in cubic_post_recovery().
-			 */
-			if (cubic_data->min_rtt_ms >
-			    cubic_data->mean_rtt_ms)
-				cubic_data->mean_rtt_ms =
-				    cubic_data->min_rtt_ms;
-		}
-
-		/* Sum samples for epoch average RTT calculation. */
-		cubic_data->sum_rtt_ms += t_srtt_ms;
-		cubic_data->epoch_ack_count++;
+		if (cubic_data->min_rtt_ms >
+		    cubic_data->mean_rtt_ms)
+			cubic_data->mean_rtt_ms =
+				cubic_data->min_rtt_ms;
 	}
+
+	/* Sum samples for epoch average RTT calculation. */
+	cubic_data->sum_rtt_ms += rtt_ms;
+	cubic_data->epoch_ack_count++;
 }
 
 /*
