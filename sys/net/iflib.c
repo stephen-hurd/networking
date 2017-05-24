@@ -2666,20 +2666,17 @@ print_pkt(if_pkt_info_t pi)
 static int
 iflib_parse_header(iflib_txq_t txq, if_pkt_info_t pi, struct mbuf **mp)
 {
-	if_shared_ctx_t sctx = txq->ift_ctx->ifc_sctx;
+	if_ctx_t ctx = txq->ift_ctx;
+	if_shared_ctx_t sctx = ctx->ifc_sctx;
+	if_softc_ctx_t scctx = &ctx->ifc_softc_ctx;
 	struct ether_vlan_header *eh;
 	struct mbuf *m, *n;
+	int err;
 
+	if (scctx->isc_txrx->ift_txd_errata &&
+	    (err = scctx->isc_txrx->ift_txd_errata(ctx->ifc_softc, mp)))
+	    return (err);
 	n = m = *mp;
-	if ((sctx->isc_flags & IFLIB_NEED_SCRATCH) &&
-	    M_WRITABLE(m) == 0) {
-		if ((m = m_dup(m, M_NOWAIT)) == NULL) {
-			return (ENOMEM);
-		} else {
-			m_freem(*mp);
-			n = *mp = m;
-		}
-	}
 
 	/*
 	 * Determine where frame payload starts.
