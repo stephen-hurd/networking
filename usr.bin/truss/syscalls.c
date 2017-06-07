@@ -37,6 +37,7 @@ __FBSDID("$FreeBSD$");
  * arguments.
  */
 
+#include <sys/capsicum.h>
 #include <sys/types.h>
 #include <sys/event.h>
 #include <sys/ioccom.h>
@@ -76,6 +77,8 @@ __FBSDID("$FreeBSD$");
  */
 static struct syscall decoded_syscalls[] = {
 	/* Native ABI */
+	{ .name = "__cap_rights_get", .ret_type = 1, .nargs = 3,
+	  .args = { { Int, 0 }, { Int, 1 }, { CapRights | OUT, 2 } } },
 	{ .name = "__getcwd", .ret_type = 1, .nargs = 2,
 	  .args = { { Name | OUT, 0 }, { Int, 1 } } },
 	{ .name = "_umtx_op", .ret_type = 1, .nargs = 5,
@@ -86,7 +89,7 @@ static struct syscall decoded_syscalls[] = {
 	{ .name = "access", .ret_type = 1, .nargs = 2,
 	  .args = { { Name | IN, 0 }, { Accessmode, 1 } } },
 	{ .name = "bind", .ret_type = 1, .nargs = 3,
-	  .args = { { Int, 0 }, { Sockaddr | IN, 1 }, { Int, 2 } } },
+	  .args = { { Int, 0 }, { Sockaddr | IN, 1 }, { Socklent, 2 } } },
 	{ .name = "bindat", .ret_type = 1, .nargs = 4,
 	  .args = { { Atfd, 0 }, { Int, 1 }, { Sockaddr | IN, 2 },
 		    { Int, 3 } } },
@@ -96,6 +99,10 @@ static struct syscall decoded_syscalls[] = {
 	  .args = { { Int, 0 }, { CapFcntlRights | OUT, 1 } } },
 	{ .name = "cap_fcntls_limit", .ret_type = 1, .nargs = 2,
 	  .args = { { Int, 0 }, { CapFcntlRights, 1 } } },
+	{ .name = "cap_getmode", .ret_type = 1, .nargs = 1,
+	  .args = { { PUInt | OUT, 0 } } },
+	{ .name = "cap_rights_limit", .ret_type = 1, .nargs = 2,
+	  .args = { { Int, 0 }, { CapRights, 1 } } },
 	{ .name = "chdir", .ret_type = 1, .nargs = 1,
 	  .args = { { Name, 0 } } },
 	{ .name = "chflags", .ret_type = 1, .nargs = 2,
@@ -114,10 +121,14 @@ static struct syscall decoded_syscalls[] = {
 	{ .name = "close", .ret_type = 1, .nargs = 1,
 	  .args = { { Int, 0 } } },
 	{ .name = "connect", .ret_type = 1, .nargs = 3,
-	  .args = { { Int, 0 }, { Sockaddr | IN, 1 }, { Int, 2 } } },
+	  .args = { { Int, 0 }, { Sockaddr | IN, 1 }, { Socklent, 2 } } },
 	{ .name = "connectat", .ret_type = 1, .nargs = 4,
 	  .args = { { Atfd, 0 }, { Int, 1 }, { Sockaddr | IN, 2 },
 		    { Int, 3 } } },
+	{ .name = "dup", .ret_type = 1, .nargs = 1,
+	  .args = { { Int, 0 } } },
+	{ .name = "dup2", .ret_type = 1, .nargs = 2,
+	  .args = { { Int, 0 }, { Int, 1 } } },
 	{ .name = "eaccess", .ret_type = 1, .nargs = 2,
 	  .args = { { Name | IN, 0 }, { Accessmode, 1 } } },
 	{ .name = "execve", .ret_type = 1, .nargs = 3,
@@ -158,6 +169,9 @@ static struct syscall decoded_syscalls[] = {
 	  .args = { { Int, 0 }, { Timeval2 | IN, 1 } } },
 	{ .name = "futimesat", .ret_type = 1, .nargs = 3,
 	  .args = { { Atfd, 0 }, { Name | IN, 1 }, { Timeval2 | IN, 2 } } },
+	{ .name = "getdirentries", .ret_type = 1, .nargs = 4,
+	  .args = { { Int, 0 }, { BinString | OUT, 1 }, { Int, 2 },
+		    { PQuadHex | OUT, 3 } } },
 	{ .name = "getfsstat", .ret_type = 1, .nargs = 3,
 	  .args = { { Ptr, 0 }, { Long, 1 }, { Getfsstatmode, 2 } } },
 	{ .name = "getitimer", .ret_type = 1, .nargs = 2,
@@ -169,11 +183,14 @@ static struct syscall decoded_syscalls[] = {
 	{ .name = "getrlimit", .ret_type = 1, .nargs = 2,
 	  .args = { { Resource, 0 }, { Rlimit | OUT, 1 } } },
 	{ .name = "getrusage", .ret_type = 1, .nargs = 2,
-	  .args = { { Int, 0 }, { Rusage | OUT, 1 } } },
+	  .args = { { RusageWho, 0 }, { Rusage | OUT, 1 } } },
 	{ .name = "getsid", .ret_type = 1, .nargs = 1,
 	  .args = { { Int, 0 } } },
 	{ .name = "getsockname", .ret_type = 1, .nargs = 3,
 	  .args = { { Int, 0 }, { Sockaddr | OUT, 1 }, { Ptr | OUT, 2 } } },
+	{ .name = "getsockopt", .ret_type = 1, .nargs = 5,
+	  .args = { { Int, 0 }, { Sockoptlevel, 1 }, { Sockoptname, 2 },
+		    { Ptr | OUT, 3 }, { Ptr | OUT, 4 } } },
 	{ .name = "gettimeofday", .ret_type = 1, .nargs = 2,
 	  .args = { { Timeval | OUT, 0 }, { Ptr, 1 } } },
 	{ .name = "ioctl", .ret_type = 1, .nargs = 3,
@@ -212,7 +229,9 @@ static struct syscall decoded_syscalls[] = {
 	{ .name = "linkat", .ret_type = 1, .nargs = 5,
 	  .args = { { Atfd, 0 }, { Name, 1 }, { Atfd, 2 }, { Name, 3 },
 		    { Atflags, 4 } } },
-	{ .name = "lseek", .ret_type = 2, .nargs = 3,
+	{ .name = "listen", .ret_type = 1, .nargs = 2,
+	  .args = { { Int, 0 }, { Int, 1 } } },
+ 	{ .name = "lseek", .ret_type = 2, .nargs = 3,
 	  .args = { { Int, 0 }, { QuadHex, 1 }, { Whence, 2 } } },
 	{ .name = "lstat", .ret_type = 1, .nargs = 2,
 	  .args = { { Name | IN, 0 }, { Stat | OUT, 1 } } },
@@ -263,8 +282,14 @@ static struct syscall decoded_syscalls[] = {
 		    { Fadvice, 3 } } },
 	{ .name = "posix_openpt", .ret_type = 1, .nargs = 1,
 	  .args = { { Open, 0 } } },
+	{ .name = "pread", .ret_type = 1, .nargs = 4,
+	  .args = { { Int, 0 }, { BinString | OUT, 1 }, { Sizet, 2 },
+		    { QuadHex, 3 } } },
 	{ .name = "procctl", .ret_type = 1, .nargs = 4,
 	  .args = { { Idtype, 0 }, { Quad, 1 }, { Procctl, 2 }, { Ptr, 3 } } },
+	{ .name = "pwrite", .ret_type = 1, .nargs = 4,
+	  .args = { { Int, 0 }, { BinString | IN, 1 }, { Sizet, 2 },
+		    { QuadHex, 3 } } },
 	{ .name = "read", .ret_type = 1, .nargs = 3,
 	  .args = { { Int, 0 }, { BinString | OUT, 1 }, { Sizet, 2 } } },
 	{ .name = "readlink", .ret_type = 1, .nargs = 3,
@@ -273,8 +298,11 @@ static struct syscall decoded_syscalls[] = {
 	  .args = { { Atfd, 0 }, { Name, 1 }, { Readlinkres | OUT, 2 },
 		    { Sizet, 3 } } },
 	{ .name = "recvfrom", .ret_type = 1, .nargs = 6,
-	  .args = { { Int, 0 }, { BinString | OUT, 1 }, { Sizet, 2 }, { Hex, 3 },
-		    { Sockaddr | OUT, 4 }, { Ptr | OUT, 5 } } },
+	  .args = { { Int, 0 }, { BinString | OUT, 1 }, { Sizet, 2 },
+	            { Msgflags, 3 }, { Sockaddr | OUT, 4 },
+	            { Ptr | OUT, 5 } } },
+	{ .name = "recvmsg", .ret_type = 1, .nargs = 3,
+	  .args = { { Int, 0 }, { Ptr, 1 }, { Msgflags, 2 } } },
 	{ .name = "rename", .ret_type = 1, .nargs = 2,
 	  .args = { { Name, 0 }, { Name, 1 } } },
 	{ .name = "renameat", .ret_type = 1, .nargs = 4,
@@ -283,16 +311,30 @@ static struct syscall decoded_syscalls[] = {
 	  .args = { { Rforkflags, 0 } } },
 	{ .name = "rmdir", .ret_type = 1, .nargs = 1,
 	  .args = { { Name, 0 } } },
+	{ .name = "sctp_generic_recvmsg", .ret_type = 1, .nargs = 7,
+	  .args = { { Int, 0 }, { Ptr | IN, 1 }, { Int, 2 },
+	            { Sockaddr | OUT, 3 }, { Ptr | OUT, 4 }, { Ptr | OUT, 5 },
+	            { Ptr | OUT, 6 } } },
+	{ .name = "sctp_generic_sendmsg", .ret_type = 1, .nargs = 7,
+	  .args = { { Int, 0 }, { BinString | IN, 1 }, { Int, 2 },
+	            { Sockaddr | IN, 3 }, { Socklent, 4 }, { Ptr | IN, 5 },
+	            { Msgflags, 6 } } },
 	{ .name = "select", .ret_type = 1, .nargs = 5,
 	  .args = { { Int, 0 }, { Fd_set, 1 }, { Fd_set, 2 }, { Fd_set, 3 },
 		    { Timeval, 4 } } },
+	{ .name = "sendmsg", .ret_type = 1, .nargs = 3,
+	  .args = { { Int, 0 }, { Ptr, 1 }, { Msgflags, 2 } } },
 	{ .name = "sendto", .ret_type = 1, .nargs = 6,
-	  .args = { { Int, 0 }, { BinString | IN, 1 }, { Sizet, 2 }, { Hex, 3 },
-		    { Sockaddr | IN, 4 }, { Int | IN, 5 } } },
+	  .args = { { Int, 0 }, { BinString | IN, 1 }, { Sizet, 2 },
+	            { Msgflags, 3 }, { Sockaddr | IN, 4 },
+	            { Socklent | IN, 5 } } },
 	{ .name = "setitimer", .ret_type = 1, .nargs = 3,
 	  .args = { { Int, 0 }, { Itimerval, 1 }, { Itimerval | OUT, 2 } } },
 	{ .name = "setrlimit", .ret_type = 1, .nargs = 2,
 	  .args = { { Resource, 0 }, { Rlimit | IN, 1 } } },
+	{ .name = "setsockopt", .ret_type = 1, .nargs = 5,
+	  .args = { { Int, 0 }, { Sockoptlevel, 1 }, { Sockoptname, 2 },
+		    { Ptr | IN, 3 }, { Socklent, 4 } } },
 	{ .name = "shutdown", .ret_type = 1, .nargs = 2,
 	  .args = { { Int, 0 }, { Shutdown, 1 } } },
 	{ .name = "sigaction", .ret_type = 1, .nargs = 3,
@@ -315,7 +357,7 @@ static struct syscall decoded_syscalls[] = {
 	{ .name = "sigwaitinfo", .ret_type = 1, .nargs = 2,
 	  .args = { { Sigset | IN, 0 }, { Ptr, 1 } } },
 	{ .name = "socket", .ret_type = 1, .nargs = 3,
-	  .args = { { Sockdomain, 0 }, { Socktype, 1 }, { Int, 2 } } },
+	  .args = { { Sockdomain, 0 }, { Socktype, 1 }, { Sockprotocol, 2 } } },
 	{ .name = "stat", .ret_type = 1, .nargs = 2,
 	  .args = { { Name | IN, 0 }, { Stat | OUT, 1 } } },
 	{ .name = "statfs", .ret_type = 1, .nargs = 2,
@@ -1163,6 +1205,16 @@ print_arg(struct syscall_args *sc, unsigned long *args, long *retval,
 	case UInt:
 		fprintf(fp, "%u", (unsigned int)args[sc->offset]);
 		break;
+	case PUInt: {
+		unsigned int val;
+
+		if (get_struct(pid, (void *)args[sc->offset], &val,
+		    sizeof(val)) == 0) 
+			fprintf(fp, "{ %u }", val);
+		else
+			fprintf(fp, "0x%lx", args[sc->offset]);
+		break;
+	}
 	case LongHex:
 		fprintf(fp, "0x%lx", args[sc->offset]);
 		break;
@@ -1315,6 +1367,16 @@ print_arg(struct syscall_args *sc, unsigned long *args, long *retval,
 		break;
 	}
 #endif
+	case PQuadHex: {
+		uint64_t val;
+
+		if (get_struct(pid, (void *)args[sc->offset], &val,
+		    sizeof(val)) == 0) 
+			fprintf(fp, "{ 0x%jx }", (uintmax_t)val);
+		else
+			fprintf(fp, "0x%lx", args[sc->offset]);
+		break;
+	}
 	case Ptr:
 		fprintf(fp, "0x%lx", args[sc->offset]);
 		break;
@@ -1556,6 +1618,9 @@ print_arg(struct syscall_args *sc, unsigned long *args, long *retval,
 		break;
 	case Resource:
 		print_integer_arg(sysdecode_rlimit, fp, args[sc->offset]);
+		break;
+	case RusageWho:
+		print_integer_arg(sysdecode_getrusage_who, fp, args[sc->offset]);
 		break;
 	case Pathconf:
 		fputs(xlookup(pathconf_arg, args[sc->offset]), fp);
@@ -1912,6 +1977,60 @@ print_arg(struct syscall_args *sc, unsigned long *args, long *retval,
 	case Madvice:
 		print_integer_arg(sysdecode_madvice, fp, args[sc->offset]);
 		break;
+	case Socklent:
+		fprintf(fp, "%u", (socklen_t)args[sc->offset]);
+		break;
+	case Sockprotocol: {
+		const char *temp;
+		int domain, protocol;
+
+		domain = args[sc->offset - 2];
+		protocol = args[sc->offset];
+		if (protocol == 0) {
+			fputs("0", fp);
+		} else {
+			temp = sysdecode_socket_protocol(domain, protocol);
+			if (temp) {
+				fputs(temp, fp);
+			} else {
+				fprintf(fp, "%d", protocol);
+			}
+		}
+		break;
+	}
+	case Sockoptlevel:
+		print_integer_arg(sysdecode_sockopt_level, fp,
+		    args[sc->offset]);
+		break;
+	case Sockoptname: {
+		const char *temp;
+		int level, name;
+
+		level = args[sc->offset - 1];
+		name = args[sc->offset];
+		temp = sysdecode_sockopt_name(level, name);
+		if (temp) {
+			fputs(temp, fp);
+		} else {
+			fprintf(fp, "%d", name);
+		}
+		break;
+	}
+	case Msgflags:
+		print_mask_arg(sysdecode_msg_flags, fp, args[sc->offset]);
+		break;
+	case CapRights: {
+		cap_rights_t rights;
+
+		if (get_struct(pid, (void *)args[sc->offset], &rights,
+		    sizeof(rights)) != -1) {
+			fputs("{ ", fp);
+			sysdecode_cap_rights(fp, &rights);
+			fputs(" }", fp);
+		} else
+			fprintf(fp, "0x%lx", args[sc->offset]);
+		break;
+	}
 
 	case CloudABIAdvice:
 		fputs(xlookup(cloudabi_advice, args[sc->offset]), fp);
