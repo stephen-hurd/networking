@@ -5321,7 +5321,7 @@ iflib_msix_init(if_ctx_t ctx)
 
 	device_printf(dev, "using %d rx queues %d tx queues \n", rx_queues, tx_queues);
 
-	vectors = rx_queues + admincnt;
+	vectors = tx_queues + rx_queues + admincnt;
 	if ((err = pci_alloc_msix(dev, &vectors)) == 0) {
 		device_printf(dev,
 					  "Using MSIX interrupts with %d vectors\n", vectors);
