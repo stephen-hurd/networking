@@ -1946,16 +1946,16 @@ em_if_msix_intr_assign(if_ctx_t ctx, int msix)
 	}
 
 	/* Link interrupt */
-	rid = rx_vectors + 1;
+	rid = vector + 1;
 	error = iflib_irq_alloc_generic(ctx, &adapter->irq, rid, IFLIB_INTR_ADMIN, em_msix_link, adapter, 0, "aq");
 
 	if (error) {
 		device_printf(iflib_get_dev(ctx), "Failed to register admin handler");
 		goto fail;
 	}
-	adapter->linkvec = rx_vectors;
+	adapter->linkvec = vector;
 	if (adapter->hw.mac.type < igb_mac_min) {
-		adapter->ivars |=  (8 | rx_vectors) << 16;
+		adapter->ivars |=  (8 | vector) << 16;
 		adapter->ivars |= 0x80000000;
 	}
 	return (0);
