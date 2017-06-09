@@ -1882,7 +1882,7 @@ em_if_msix_intr_assign(if_ctx_t ctx, int msix)
 	struct adapter *adapter = iflib_get_softc(ctx);
 	struct em_rx_queue *rx_que = adapter->rx_queues;
 	struct em_tx_queue *tx_que = adapter->tx_queues;
-	int error, rid, i, vector = 0, rx_vectors;
+	int error, rid, i, vector = 0;
 	char buf[16];
 
 	/* First set up ring resources */
@@ -1913,7 +1913,6 @@ em_if_msix_intr_assign(if_ctx_t ctx, int msix)
 		else
 			rx_que->eims = 1 << vector;
 	}
-	rx_vectors = vector;
 
 	for (i = 0; i < adapter->tx_num_queues; i++, tx_que++, vector++) {
 		rid = vector + 1;
@@ -1953,6 +1952,7 @@ em_if_msix_intr_assign(if_ctx_t ctx, int msix)
 		device_printf(iflib_get_dev(ctx), "Failed to register admin handler");
 		goto fail;
 	}
+
 	adapter->linkvec = vector;
 	if (adapter->hw.mac.type < igb_mac_min) {
 		adapter->ivars |=  (8 | vector) << 16;
