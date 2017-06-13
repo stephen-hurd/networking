@@ -3522,7 +3522,7 @@ _task_fn_rx(void *context)
 	int rc;
 
 #ifdef IFLIB_DIAGNOSTICS
-	static count = 0;
+	static int count = 0;
 	rxq->ifr_cpu_exec_count[curcpu]++;
 	if (count++ % 10 == 0)
 		device_printf(iflib_get_dev(ctx), "%s called", __FUNCTION__);
