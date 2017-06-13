@@ -105,7 +105,7 @@ em_dump_rs(struct adapter *adapter)
 	int16_t rs_cidx;
 	uint8_t status;
 
-	printf("\n");
+	printf("\ndump:\n");
 	ntxd = scctx->isc_ntxd[0];
 	for (qid = 0; qid < adapter->tx_num_queues; qid++) {
 		que = &adapter->tx_queues[qid];

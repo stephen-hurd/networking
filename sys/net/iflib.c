@@ -2102,8 +2102,10 @@ iflib_timer(void *arg)
 	if_ctx_t ctx = txq->ift_ctx;
 	if_softc_ctx_t sctx = &ctx->ifc_softc_ctx;
 
-	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
+	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)) {
+		device_printf(iflib_get_dev(ctx), "%s called, but not up\n", __FUNCTION__);
 		return;
+	}
 #ifdef IFLIB_DIAGNOSTICS
 	IFDI_DEBUG(ctx);
 #endif
@@ -2206,9 +2208,13 @@ iflib_init_locked(if_ctx_t ctx)
 	if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_RUNNING, IFF_DRV_OACTIVE);
 	IFDI_INTR_ENABLE(ctx);
 	txq = ctx->ifc_txqs;
-	for (i = 0; i < sctx->isc_ntxqsets; i++, txq++)
+	for (i = 0; i < sctx->isc_ntxqsets; i++, txq++) {
+#ifdef IFLIB_DIAGNOSTICS
+		device_printf(iflib_get_dev(ctx), "timer interval set to %d\n", iflib_timer_int);
+#endif
 		callout_reset_on(&txq->ift_timer, iflib_timer_int, iflib_timer,
-			txq, txq->ift_timer.c_cpu);
+				 txq, txq->ift_timer.c_cpu);
+	}
 }
 
 static int
