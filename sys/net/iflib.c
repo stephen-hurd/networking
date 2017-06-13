@@ -2106,9 +2106,10 @@ iflib_timer(void *arg)
 		device_printf(iflib_get_dev(ctx), "%s called, but not up\n", __FUNCTION__);
 		return;
 	}
-#ifdef IFLIB_DIAGNOSTICS
+
+	device_printf(iflib_get_dev(ctx), "%s called and up\n", __FUNCTION__);
 	IFDI_DEBUG(ctx);
-#endif
+
 	/*
 	** Check on the state of the TX queue(s), this
 	** can be done without the lock because its RO
@@ -2210,7 +2211,7 @@ iflib_init_locked(if_ctx_t ctx)
 	txq = ctx->ifc_txqs;
 	for (i = 0; i < sctx->isc_ntxqsets; i++, txq++) {
 #ifdef IFLIB_DIAGNOSTICS
-		device_printf(iflib_get_dev(ctx), "timer interval set to %d\n", iflib_timer_int);
+		device_printf(iflib_get_dev(ctx), "cpu=%d, timer interval set to %d\n", txq->ift_timer.c_cpu, iflib_timer_int);
 #endif
 		callout_reset_on(&txq->ift_timer, iflib_timer_int, iflib_timer,
 				 txq, txq->ift_timer.c_cpu);
@@ -3521,8 +3522,10 @@ _task_fn_rx(void *context)
 	int rc;
 
 #ifdef IFLIB_DIAGNOSTICS
+	static count = 0;
 	rxq->ifr_cpu_exec_count[curcpu]++;
-	device_printf(iflib_get_dev(ctx), "%s called", __FUNCTION__);
+	if (count++ % 10 == 0)
+		device_printf(iflib_get_dev(ctx), "%s called", __FUNCTION__);
 #endif
 	DBG_COUNTER_INC(task_fn_rxs);
 	if (__predict_false(!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)))
