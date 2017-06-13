@@ -2178,6 +2178,7 @@ iflib_init_locked(if_ctx_t ctx)
 		if_sethwassistbits(ifp, CSUM_IP6_TSO, 0);
 
 	for (i = 0, txq = ctx->ifc_txqs; i < sctx->isc_ntxqsets; i++, txq++) {
+		device_printf(iflib_get_dev(ctx), "stopping callout\n");
 		CALLOUT_LOCK(txq);
 		callout_stop(&txq->ift_timer);
 		CALLOUT_UNLOCK(txq);
@@ -3451,6 +3452,7 @@ iflib_txq_drain_free(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 	txq = r->cookie;
 
 	txq->ift_qstatus = IFLIB_QUEUE_IDLE;
+	device_printf(iflib_get_dev(txq->ift_ctx), "stopping callout\n");
 	CALLOUT_LOCK(txq);
 	callout_stop(&txq->ift_timer);
 	CALLOUT_UNLOCK(txq);
@@ -3557,16 +3559,20 @@ _task_fn_admin(void *context)
 	device_printf(iflib_get_dev(ctx), "%s called", __FUNCTION__);
 	CTX_LOCK(ctx);
 	for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_ntxqsets; i++, txq++) {
+		device_printf(iflib_get_dev(ctx), "stopping callout\n");
 		CALLOUT_LOCK(txq);
 		callout_stop(&txq->ift_timer);
 		CALLOUT_UNLOCK(txq);
 	}
 	IFDI_UPDATE_ADMIN_STATUS(ctx);
 	if (running) {
+		device_printf(iflib_get_dev(ctx), "starting callout\n");
 		for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_ntxqsets; i++, txq++)
 			callout_reset_on(&txq->ift_timer, iflib_timer_int, iflib_timer,
 			    txq, txq->ift_timer.c_cpu);
 		IFDI_LINK_INTR_ENABLE(ctx);
+	} else {
+		device_printf(iflib_get_dev(ctx), "not restarting callout - not running\n");
 	}
 	if (ctx->ifc_flags & IFC_DO_RESET) {
 		iflib_if_init_locked(ctx);
