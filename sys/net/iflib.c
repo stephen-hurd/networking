@@ -2104,6 +2104,9 @@ iflib_timer(void *arg)
 
 	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
 		return;
+#ifdef IFLIB_DIAGNOSTICS
+	IFDI_DEBUG(ctx);
+#endif
 	/*
 	** Check on the state of the TX queue(s), this
 	** can be done without the lock because its RO
