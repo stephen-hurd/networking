@@ -127,6 +127,7 @@ __FBSDID("$FreeBSD: head/sys/net/iflib.c 302439 2016-07-08 17:04:21Z cem $");
  */
 static MALLOC_DEFINE(M_IFLIB, "iflib", "ifnet library");
 
+#define IFLIB_DIAGNOSTICS 1
 struct iflib_txq;
 typedef struct iflib_txq *iflib_txq_t;
 struct iflib_rxq;
@@ -3480,6 +3481,7 @@ _task_fn_tx(void *context)
 
 #ifdef IFLIB_DIAGNOSTICS
 	txq->ift_cpu_exec_count[curcpu]++;
+	device_printf(iflib_get_dev(ctx), "%s called", __FUNCTION__);
 #endif
 	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
 		return;
@@ -3511,6 +3513,7 @@ _task_fn_rx(void *context)
 
 #ifdef IFLIB_DIAGNOSTICS
 	rxq->ifr_cpu_exec_count[curcpu]++;
+	device_printf(iflib_get_dev(ctx), "%s called", __FUNCTION__);
 #endif
 	DBG_COUNTER_INC(task_fn_rxs);
 	if (__predict_false(!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)))
@@ -3539,7 +3542,7 @@ _task_fn_admin(void *context)
 	int i, running;
 
 	running = !!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING);
-
+	device_printf(iflib_get_dev(ctx), "%s called", __FUNCTION__);
 	CTX_LOCK(ctx);
 	for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_ntxqsets; i++, txq++) {
 		CALLOUT_LOCK(txq);
