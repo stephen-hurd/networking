@@ -3538,9 +3538,9 @@ _task_fn_admin(void *context)
 	iflib_txq_t txq;
 	int i, running;
 
+	CTX_LOCK(ctx);
 	running = !!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING);
 
-	CTX_LOCK(ctx);
 	for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_ntxqsets; i++, txq++) {
 		CALLOUT_LOCK(txq);
 		callout_stop(&txq->ift_timer);
