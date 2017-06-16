@@ -1958,7 +1958,6 @@ em_if_msix_intr_assign(if_ctx_t ctx, int msix)
 		adapter->ivars |=  (8 | vector) << 16;
 		adapter->ivars |= 0x80000000;
 	}
-	device_printf(iflib_get_dev(ctx), "linkvec=%d, ivars=0x%x\n", adapter->linkvec, adapter->ivars);
 	return (0);
 fail:
 	iflib_irq_free(ctx, &adapter->irq);

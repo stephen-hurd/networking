@@ -127,7 +127,6 @@ __FBSDID("$FreeBSD: head/sys/net/iflib.c 302439 2016-07-08 17:04:21Z cem $");
  */
 static MALLOC_DEFINE(M_IFLIB, "iflib", "ifnet library");
 
-#define IFLIB_DIAGNOSTICS 1
 struct iflib_txq;
 typedef struct iflib_txq *iflib_txq_t;
 struct iflib_rxq;
@@ -2102,14 +2101,8 @@ iflib_timer(void *arg)
 	if_ctx_t ctx = txq->ift_ctx;
 	if_softc_ctx_t sctx = &ctx->ifc_softc_ctx;
 
-	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)) {
-		device_printf(iflib_get_dev(ctx), "%s called, but not up\n", __FUNCTION__);
+	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
 		return;
-	}
-
-	device_printf(iflib_get_dev(ctx), "%s called and up\n", __FUNCTION__);
-	IFDI_DEBUG(ctx);
-
 	/*
 	** Check on the state of the TX queue(s), this
 	** can be done without the lock because its RO
@@ -2178,7 +2171,6 @@ iflib_init_locked(if_ctx_t ctx)
 		if_sethwassistbits(ifp, CSUM_IP6_TSO, 0);
 
 	for (i = 0, txq = ctx->ifc_txqs; i < sctx->isc_ntxqsets; i++, txq++) {
-		device_printf(iflib_get_dev(ctx), "stopping callout\n");
 		CALLOUT_LOCK(txq);
 		callout_stop(&txq->ift_timer);
 		CALLOUT_UNLOCK(txq);
@@ -2210,13 +2202,9 @@ iflib_init_locked(if_ctx_t ctx)
 	if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_RUNNING, IFF_DRV_OACTIVE);
 	IFDI_INTR_ENABLE(ctx);
 	txq = ctx->ifc_txqs;
-	for (i = 0; i < sctx->isc_ntxqsets; i++, txq++) {
-#ifdef IFLIB_DIAGNOSTICS
-		device_printf(iflib_get_dev(ctx), "cpu=%d, timer interval set to %d\n", txq->ift_timer.c_cpu, iflib_timer_int);
-#endif
+	for (i = 0; i < sctx->isc_ntxqsets; i++, txq++)
 		callout_reset_on(&txq->ift_timer, iflib_timer_int, iflib_timer,
-				 txq, txq->ift_timer.c_cpu);
-	}
+			txq, txq->ift_timer.c_cpu);
 }
 
 static int
@@ -3452,7 +3440,6 @@ iflib_txq_drain_free(struct ifmp_ring *r, uint32_t cidx, uint32_t pidx)
 	txq = r->cookie;
 
 	txq->ift_qstatus = IFLIB_QUEUE_IDLE;
-	device_printf(iflib_get_dev(txq->ift_ctx), "stopping callout\n");
 	CALLOUT_LOCK(txq);
 	callout_stop(&txq->ift_timer);
 	CALLOUT_UNLOCK(txq);
@@ -3493,7 +3480,6 @@ _task_fn_tx(void *context)
 
 #ifdef IFLIB_DIAGNOSTICS
 	txq->ift_cpu_exec_count[curcpu]++;
-	device_printf(iflib_get_dev(ctx), "%s called", __FUNCTION__);
 #endif
 	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
 		return;
@@ -3524,10 +3510,7 @@ _task_fn_rx(void *context)
 	int rc;
 
 #ifdef IFLIB_DIAGNOSTICS
-	static int count = 0;
 	rxq->ifr_cpu_exec_count[curcpu]++;
-	if (count++ % 10 == 0)
-		device_printf(iflib_get_dev(ctx), "%s called", __FUNCTION__);
 #endif
 	DBG_COUNTER_INC(task_fn_rxs);
 	if (__predict_false(!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)))
@@ -3556,23 +3539,19 @@ _task_fn_admin(void *context)
 	int i, running;
 
 	running = !!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING);
-	device_printf(iflib_get_dev(ctx), "%s called", __FUNCTION__);
+
 	CTX_LOCK(ctx);
 	for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_ntxqsets; i++, txq++) {
-		device_printf(iflib_get_dev(ctx), "stopping callout\n");
 		CALLOUT_LOCK(txq);
 		callout_stop(&txq->ift_timer);
 		CALLOUT_UNLOCK(txq);
 	}
 	IFDI_UPDATE_ADMIN_STATUS(ctx);
 	if (running) {
-		device_printf(iflib_get_dev(ctx), "starting callout\n");
 		for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_ntxqsets; i++, txq++)
 			callout_reset_on(&txq->ift_timer, iflib_timer_int, iflib_timer,
 			    txq, txq->ift_timer.c_cpu);
 		IFDI_LINK_INTR_ENABLE(ctx);
-	} else {
-		device_printf(iflib_get_dev(ctx), "not restarting callout - not running\n");
 	}
 	if (ctx->ifc_flags & IFC_DO_RESET) {
 		iflib_if_init_locked(ctx);
