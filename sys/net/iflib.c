@@ -5319,13 +5319,22 @@ iflib_msix_init(if_ctx_t ctx)
 		rx_queues = min(rx_queues, tx_queues);
 	}
 
-	device_printf(dev, "using %d rx queues %d tx queues \n", rx_queues, tx_queues);
+	device_printf(dev, "trying %d rx queues %d tx queues \n", rx_queues, tx_queues);
 
 	vectors = tx_queues + rx_queues + admincnt;
 	if ((err = pci_alloc_msix(dev, &vectors)) == 0) {
 		device_printf(dev,
 					  "Using MSIX interrupts with %d vectors\n", vectors);
 		scctx->isc_vectors = vectors;
+
+		if (vectors < tx_queues + rx_queues + admincnt) {
+			vectors -= admincnt;
+			if (vectors % 2 != 0)
+				vectors -= 1;
+			if (rx_queues > vectors / 2)
+				rx_queues = vectors / 2;
+			tx_queues = vectors - rx_queues;
+		}
 		scctx->isc_nrxqsets = rx_queues;
 		scctx->isc_ntxqsets = tx_queues;
 		scctx->isc_intr = IFLIB_INTR_MSIX;
