@@ -18,6 +18,8 @@
         ..
         expr
         ..
+        ln
+        ..
         ls
         ..
         mv
@@ -394,6 +396,8 @@
                 ..
                 plain
                 ..
+                tap
+                ..
             ..
         ..
     ..
@@ -490,6 +494,8 @@
             truncate
             ..
             unlink
+            ..
+            utimensat
             ..
         ..
         posixshm
@@ -626,6 +632,8 @@
         ..
         dirname
         ..
+        du
+        ..
         file2c
         ..
         getconf
@@ -667,6 +675,8 @@
             ..
         ..
         soelim
+        ..
+        stat
         ..
         tail
         ..
