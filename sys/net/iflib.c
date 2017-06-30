@@ -1350,6 +1350,25 @@ iflib_dma_free_multi(iflib_dma_info_t *dmalist, int count)
 		iflib_dma_free(*dmaiter);
 }
 
+static void
+txq_validate(iflib_txq_t txq) {
+#ifdef INVARIANTS
+	uint32_t cidx = txq->ift_cidx;
+	struct mbuf **ifsd_m = txq->ift_sds.ifsd_m;
+	if (txq->ift_pidx > cidx) {
+		int i;
+		for (i = txq->ift_pidx; i < txq->ift_size; i++)
+			MPASS(ifsd_m[i] == NULL);
+		for (i = 0; i < cidx; i++)
+			MPASS(ifsd_m[i] == NULL);
+	} else if (txq->ift_pidx < cidx) {
+		int i;
+		for (i = txq->ift_pidx; i < cidx; i++)
+			MPASS(ifsd_m[i] == NULL);
+	}
+#endif
+}
+
 #ifdef EARLY_AP_STARTUP
 static const int iflib_started = 1;
 #else
@@ -2915,9 +2934,9 @@ iflib_busdma_load_mbuf_sg(iflib_txq_t txq, bus_dma_tag_t tag, bus_dmamap_t map,
 	ifsd_m = txq->ift_sds.ifsd_m;
 	ntxd = txq->ift_size;
 	pidx = txq->ift_pidx;
+	MPASS(ifsd_m[pidx] == NULL);
 	if (force_busdma || map != NULL) {
 		uint8_t *ifsd_flags = txq->ift_sds.ifsd_flags;
-
 		err = bus_dmamap_load_mbuf_sg(tag, map,
 					      *m0, segs, nsegs, BUS_DMA_NOWAIT);
 		if (err)
@@ -2933,6 +2952,14 @@ iflib_busdma_load_mbuf_sg(iflib_txq_t txq, bus_dma_tag_t tag, bus_dmamap_t map,
 				m_free(tmp);
 				continue;
 			}
+			m = m->m_next;
+			count++;
+		} while (m != NULL);
+		if (count > *nsegs)
+			return (0);
+		m = *m0;
+		count = 0;
+		do {
 			next = (pidx + count) & (ntxd-1);
 			MPASS(ifsd_m[next] == NULL);
 			ifsd_m[next] = m;
@@ -3250,6 +3277,7 @@ iflib_tx_desc_free(iflib_txq_t txq, int n)
 			gen = 0;
 		}
 	}
+	txq_validate(txq);
 	txq->ift_cidx = cidx;
 	txq->ift_gen = gen;
 }
