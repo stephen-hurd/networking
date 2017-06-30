@@ -45,6 +45,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/ptrace.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
+#define _WANT_FREEBSD11_STAT
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -57,6 +58,7 @@ __FBSDID("$FreeBSD$");
 #include <err.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -144,6 +146,12 @@ static struct syscall decoded_syscalls[] = {
 	  .args = { { Int, 0 }, { Timespec | OUT, 1 } } },
 	{ .name = "close", .ret_type = 1, .nargs = 1,
 	  .args = { { Int, 0 } } },
+	{ .name = "compat11.fstat", .ret_type = 1, .nargs = 2,
+	  .args = { { Int, 0 }, { Stat11 | OUT, 1 } } },
+	{ .name = "compat11.lstat", .ret_type = 1, .nargs = 2,
+	  .args = { { Name | IN, 0 }, { Stat11 | OUT, 1 } } },
+	{ .name = "compat11.stat", .ret_type = 1, .nargs = 2,
+	  .args = { { Name | IN, 0 }, { Stat11 | OUT, 1 } } },
 	{ .name = "connect", .ret_type = 1, .nargs = 3,
 	  .args = { { Int, 0 }, { Sockaddr | IN, 1 }, { Socklent, 2 } } },
 	{ .name = "connectat", .ret_type = 1, .nargs = 4,
@@ -240,6 +248,8 @@ static struct syscall decoded_syscalls[] = {
 	  .args = { { Int, 0 }, { Sockaddr | OUT, 1 }, { Ptr | OUT, 2 } } },
 	{ .name = "getpgid", .ret_type = 1, .nargs = 1,
 	  .args = { { Int, 0 } } },
+	{ .name = "getpriority", .ret_type = 1, .nargs = 2,
+	  .args = { { Priowhich, 0 }, { Int, 1 } } },
 	{ .name = "getrlimit", .ret_type = 1, .nargs = 2,
 	  .args = { { Resource, 0 }, { Rlimit | OUT, 1 } } },
 	{ .name = "getrusage", .ret_type = 1, .nargs = 2,
@@ -359,9 +369,13 @@ static struct syscall decoded_syscalls[] = {
 		    { QuadHex, 3 } } },
 	{ .name = "procctl", .ret_type = 1, .nargs = 4,
 	  .args = { { Idtype, 0 }, { Quad, 1 }, { Procctl, 2 }, { Ptr, 3 } } },
+	{ .name = "ptrace", .ret_type = 1, .nargs = 4,
+	  .args = { { Ptraceop, 0 }, { Int, 1 }, { Ptr, 2 }, { Int, 3 } } },
 	{ .name = "pwrite", .ret_type = 1, .nargs = 4,
 	  .args = { { Int, 0 }, { BinString | IN, 1 }, { Sizet, 2 },
 		    { QuadHex, 3 } } },
+	{ .name = "quotactl", .ret_type = 1, .nargs = 4,
+	  .args = { { Name, 0 }, { Quotactlcmd, 1 }, { Int, 2 }, { Ptr, 3 } } },
 	{ .name = "read", .ret_type = 1, .nargs = 3,
 	  .args = { { Int, 0 }, { BinString | OUT, 1 }, { Sizet, 2 } } },
 	{ .name = "readlink", .ret_type = 1, .nargs = 3,
@@ -369,6 +383,8 @@ static struct syscall decoded_syscalls[] = {
 	{ .name = "readlinkat", .ret_type = 1, .nargs = 4,
 	  .args = { { Atfd, 0 }, { Name, 1 }, { Readlinkres | OUT, 2 },
 		    { Sizet, 3 } } },
+	{ .name = "reboot", .ret_type = 1, .nargs = 1,
+	  .args = { { Reboothowto, 0 } } },
 	{ .name = "recvfrom", .ret_type = 1, .nargs = 6,
 	  .args = { { Int, 0 }, { BinString | OUT, 1 }, { Sizet, 2 },
 	            { Msgflags, 3 }, { Sockaddr | OUT, 4 },
@@ -383,6 +399,24 @@ static struct syscall decoded_syscalls[] = {
 	  .args = { { Rforkflags, 0 } } },
 	{ .name = "rmdir", .ret_type = 1, .nargs = 1,
 	  .args = { { Name, 0 } } },
+	{ .name = "rtprio", .ret_type = 1, .nargs = 3,
+	  .args = { { Rtpriofunc, 0 }, { Int, 1 }, { Ptr, 2 } } },
+	{ .name = "rtprio_thread", .ret_type = 1, .nargs = 3,
+	  .args = { { Rtpriofunc, 0 }, { Int, 1 }, { Ptr, 2 } } },
+	{ .name = "sched_get_priority_max", .ret_type = 1, .nargs = 1,
+	  .args = { { Schedpolicy, 0 } } },
+	{ .name = "sched_get_priority_min", .ret_type = 1, .nargs = 1,
+	  .args = { { Schedpolicy, 0 } } },
+	{ .name = "sched_getparam", .ret_type = 1, .nargs = 2,
+	  .args = { { Int, 0 }, { Schedparam | OUT, 1 } } },
+	{ .name = "sched_getscheduler", .ret_type = 1, .nargs = 1,
+	  .args = { { Int, 0 } } },
+	{ .name = "sched_rr_get_interval", .ret_type = 1, .nargs = 2,
+	  .args = { { Int, 0 }, { Timespec | OUT, 1 } } },
+	{ .name = "sched_setparam", .ret_type = 1, .nargs = 2,
+	  .args = { { Int, 0 }, { Schedparam, 1 } } },
+	{ .name = "sched_setscheduler", .ret_type = 1, .nargs = 3,
+	  .args = { { Int, 0 }, { Schedpolicy, 1 }, { Schedparam, 2 } } },
 	{ .name = "sctp_generic_recvmsg", .ret_type = 1, .nargs = 7,
 	  .args = { { Int, 0 }, { Ptr | IN, 1 }, { Int, 2 },
 	            { Sockaddr | OUT, 3 }, { Ptr | OUT, 4 }, { Ptr | OUT, 5 },
@@ -402,6 +436,8 @@ static struct syscall decoded_syscalls[] = {
 	            { Socklent | IN, 5 } } },
 	{ .name = "setitimer", .ret_type = 1, .nargs = 3,
 	  .args = { { Int, 0 }, { Itimerval, 1 }, { Itimerval | OUT, 2 } } },
+	{ .name = "setpriority", .ret_type = 1, .nargs = 3,
+	  .args = { { Priowhich, 0 }, { Int, 1 }, { Int, 2 } } },
 	{ .name = "setrlimit", .ret_type = 1, .nargs = 2,
 	  .args = { { Resource, 0 }, { Rlimit | IN, 1 } } },
 	{ .name = "setsockopt", .ret_type = 1, .nargs = 5,
@@ -1226,7 +1262,7 @@ print_kevent(FILE *fp, struct kevent *ke, int input)
 	default:
 		fprintf(fp, "%#x", ke->fflags);
 	}
-	fprintf(fp, ",%p,%p", (void *)ke->data, (void *)ke->udata);
+	fprintf(fp, ",%#jx,%p", (uintmax_t)ke->data, ke->udata);
 }
 
 static void
@@ -1856,6 +1892,23 @@ print_arg(struct syscall_args *sc, unsigned long *args, long *retval,
 		}
 		break;
 	}
+	case Stat11: {
+		struct freebsd11_stat st;
+
+		if (get_struct(pid, (void *)args[sc->offset], &st, sizeof(st))
+		    != -1) {
+			char mode[12];
+
+			strmode(st.st_mode, mode);
+			fprintf(fp,
+			    "{ mode=%s,inode=%ju,size=%jd,blksize=%ld }", mode,
+			    (uintmax_t)st.st_ino, (intmax_t)st.st_size,
+			    (long)st.st_blksize);
+		} else {
+			fprintf(fp, "0x%lx", args[sc->offset]);
+		}
+		break;
+	}
 	case StatFs: {
 		unsigned int i;
 		struct statfs buf;
@@ -2123,6 +2176,38 @@ print_arg(struct syscall_args *sc, unsigned long *args, long *retval,
 	case Msync:
 		print_mask_arg(sysdecode_msync_flags, fp, args[sc->offset]);
 		break;
+	case Priowhich:
+		print_integer_arg(sysdecode_prio_which, fp, args[sc->offset]);
+		break;
+	case Ptraceop:
+		print_integer_arg(sysdecode_ptrace_request, fp,
+		    args[sc->offset]);
+		break;
+	case Quotactlcmd:
+		if (!sysdecode_quotactl_cmd(fp, args[sc->offset]))
+			fprintf(fp, "%#x", (int)args[sc->offset]);
+		break;
+	case Reboothowto:
+		print_mask_arg(sysdecode_reboot_howto, fp, args[sc->offset]);
+		break;
+	case Rtpriofunc:
+		print_integer_arg(sysdecode_rtprio_function, fp,
+		    args[sc->offset]);
+		break;
+	case Schedpolicy:
+		print_integer_arg(sysdecode_scheduler_policy, fp,
+		    args[sc->offset]);
+		break;
+	case Schedparam: {
+		struct sched_param sp;
+
+		if (get_struct(pid, (void *)args[sc->offset], &sp,
+		    sizeof(sp)) != -1)
+			fprintf(fp, "{ %d }", sp.sched_priority);
+		else
+			fprintf(fp, "0x%lx", args[sc->offset]);
+		break;
+	}
 
 	case CloudABIAdvice:
 		fputs(xlookup(cloudabi_advice, args[sc->offset]), fp);
