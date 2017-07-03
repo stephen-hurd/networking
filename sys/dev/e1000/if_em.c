@@ -1763,7 +1763,8 @@ em_if_update_admin_status(if_ctx_t ctx)
 		    (hw->phy.id == I210_I_PHY_ID))
 			msec_delay(I210_LINK_DELAY);
 		/* Reset if the media type changed. */
-		if (hw->dev_spec._82575.media_changed) {
+		if (hw->dev_spec._82575.media_changed &&
+			adapter->hw.mac.type >= igb_mac_min) {
 			hw->dev_spec._82575.media_changed = false;
 			adapter->flags |= IGB_MEDIA_RESET;
 			em_reset(ctx);
@@ -2563,6 +2564,7 @@ em_reset(if_ctx_t ctx)
 		em_disable_aspm(adapter);
 	}
 	if (adapter->flags & IGB_MEDIA_RESET) {
+		/* the following will panic with INVARIANTS ¯\_(ツ)_/¯ */
 		e1000_setup_init_funcs(hw, TRUE);
 		e1000_get_bus_info(hw);
 		adapter->flags &= ~IGB_MEDIA_RESET;
