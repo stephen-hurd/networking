@@ -1399,7 +1399,9 @@ em_msix_link(void *arg)
 {
 	struct adapter *adapter = arg;
 	u32 reg_icr;
+	int is_igb;
 
+	is_igb = (adapter->hw.mac.type >= igb_mac_min);
 	++adapter->link_irq;
 	MPASS(adapter->hw.back != NULL); 
 	reg_icr = E1000_READ_REG(&adapter->hw, E1000_ICR);
@@ -1407,26 +1409,29 @@ em_msix_link(void *arg)
 	if (reg_icr & E1000_ICR_RXO)
 		adapter->rx_overruns++;
 
-	if (reg_icr & (E1000_ICR_RXSEQ | E1000_ICR_LSC)) {
-		em_handle_link(adapter->ctx);
+	if (is_igb) {
+		if (reg_icr & E1000_ICR_LSC)
+			em_handle_link(adapter->ctx);
+		E1000_WRITE_REG(&adapter->hw, E1000_IMS, E1000_IMS_LSC);
+		E1000_WRITE_REG(&adapter->hw, E1000_EIMS, adapter->link_mask);
 	} else {
+		if (reg_icr & (E1000_ICR_RXSEQ | E1000_ICR_LSC)) {
+			em_handle_link(adapter->ctx);
+		}
 		E1000_WRITE_REG(&adapter->hw, E1000_IMS,
-				EM_MSIX_LINK | E1000_IMS_LSC);
-		if (adapter->hw.mac.type >= igb_mac_min)
-			E1000_WRITE_REG(&adapter->hw, E1000_EIMS, adapter->link_mask);
-	}
+					EM_MSIX_LINK | E1000_IMS_LSC);
 
-	/*
-	 * Because we must read the ICR for this interrupt
-	 * it may clear other causes using autoclear, for
-	 * this reason we simply create a soft interrupt
-	 * for all these vectors.
-	 */
-	if (reg_icr && adapter->hw.mac.type < igb_mac_min) {
-		E1000_WRITE_REG(&adapter->hw,
-			E1000_ICS, adapter->ims);
+		/*
+		 * Because we must read the ICR for this interrupt
+		 * it may clear other causes using autoclear, for
+		 * this reason we simply create a soft interrupt
+		 * for all these vectors.
+		 */
+		if (reg_icr) {
+			E1000_WRITE_REG(&adapter->hw,
+					E1000_ICS, adapter->ims);
+		}
 	}
-
 	return (FILTER_HANDLED);
 }
 
