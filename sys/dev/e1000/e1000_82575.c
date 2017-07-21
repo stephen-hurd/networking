@@ -1058,7 +1058,7 @@ static s32 e1000_acquire_swfw_sync_82575(struct e1000_hw *hw, u16 mask)
 	s32 i = 0, timeout = 200;
 
 	DEBUGFUNC("e1000_acquire_swfw_sync_82575");
-
+	ASSERT_NO_LOCKS();
 	while (i < timeout) {
 		if (e1000_get_hw_semaphore_generic(hw)) {
 			ret_val = -E1000_ERR_SWFW_SYNC;

@@ -408,7 +408,7 @@ static s32 e1000_acquire_swfw_sync_80003es2lan(struct e1000_hw *hw, u16 mask)
 	s32 timeout = 50;
 
 	DEBUGFUNC("e1000_acquire_swfw_sync_80003es2lan");
-
+	ASSERT_NO_LOCKS();
 	while (i < timeout) {
 		if (e1000_get_hw_semaphore_generic(hw))
 			return -E1000_ERR_SWFW_SYNC;
