@@ -91,9 +91,11 @@ s32 e1000_acquire_swfw_sync_i210(struct e1000_hw *hw, u16 mask)
 	u32 swmask = mask;
 	u32 fwmask = mask << 16;
 	s32 ret_val = E1000_SUCCESS;
+	/* Uhh the following line should read 'FIXME: this is a blazing tire fire' */
 	s32 i = 0, timeout = 200; /* FIXME: find real value to use here */
 
 	DEBUGFUNC("e1000_acquire_swfw_sync_i210");
+	ASSERT_NO_LOCKS();
 
 	while (i < timeout) {
 		if (e1000_get_hw_semaphore_i210(hw)) {

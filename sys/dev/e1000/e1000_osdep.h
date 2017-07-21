@@ -216,5 +216,13 @@ struct e1000_osdep
     bus_space_write_2(((struct e1000_osdep *)(hw)->back)->flash_bus_space_tag, \
         ((struct e1000_osdep *)(hw)->back)->flash_bus_space_handle, reg, value)
 
+#include <sys/proc.h>
+#define ASSERT_NO_LOCKS()				\
+	do {						\
+		MPASS(curthread->td_locks == 0);	\
+		MPASS(curthread->td_rw_rlocks == 0);	\
+		MPASS(curthread->td_lk_slocks == 0);	\
+	} while (0)
+
 #endif  /* _FREEBSD_OS_H_ */
 
