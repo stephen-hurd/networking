@@ -219,9 +219,12 @@ struct e1000_osdep
 #include <sys/proc.h>
 #define ASSERT_NO_LOCKS()				\
 	do {						\
-		MPASS(curthread->td_locks == 0);	\
-		MPASS(curthread->td_rw_rlocks == 0);	\
-		MPASS(curthread->td_lk_slocks == 0);	\
+		if (curthread->td_locks == 1)			\
+			mtx_assert(&Giant, MA_OWNED);		\
+		else						\
+			MPASS(curthread->td_locks == 0);	\
+		MPASS(curthread->td_rw_rlocks == 0);		\
+		MPASS(curthread->td_lk_slocks == 0);		\
 	} while (0)
 
 #endif  /* _FREEBSD_OS_H_ */
