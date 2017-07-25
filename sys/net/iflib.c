@@ -2244,8 +2244,8 @@ iflib_media_status(if_t ifp, struct ifmediareq *ifmr)
 {
 	if_ctx_t ctx = if_getsoftc(ifp);
 
+	iflib_admin_intr_deferred(ctx);
 	CTX_LOCK(ctx);
-	IFDI_UPDATE_ADMIN_STATUS(ctx);
 	IFDI_MEDIA_STATUS(ctx, ifmr);
 	CTX_UNLOCK(ctx);
 }
@@ -3574,7 +3574,6 @@ _task_fn_admin(void *context)
 		callout_stop(&txq->ift_timer);
 		CALLOUT_UNLOCK(txq);
 	}
-	IFDI_UPDATE_ADMIN_STATUS(ctx);
 	if (running) {
 		for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_ntxqsets; i++, txq++)
 			callout_reset_on(&txq->ift_timer, iflib_timer_int, iflib_timer,
@@ -3587,6 +3586,7 @@ _task_fn_admin(void *context)
 	}
 	CTX_UNLOCK(ctx);
 
+	IFDI_UPDATE_ADMIN_STATUS(ctx);
 	if (LINK_ACTIVE(ctx) == 0)
 		return;
 	if (running)
@@ -4148,6 +4148,7 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 		if (!powerof2(scctx->isc_nrxd[i])) {
 			/* round down instead? */
 			device_printf(dev, "# rx descriptors must be a power of 2\n");
+
 			err = EINVAL;
 			goto fail;
 		}
