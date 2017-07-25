@@ -964,7 +964,7 @@ ixgbe_if_attach_pre(if_ctx_t ctx)
 	scctx->isc_tx_tso_size_max = IXGBE_TSO_SIZE;
 	scctx->isc_tx_tso_segsize_max = PAGE_SIZE;
 	/* XXX */
-	scctx->isc_max_txqsets = scctx->isc_max_rxqsets = 32;
+	scctx->isc_ntxqsets_max = scctx->isc_nrxqsets_max = 32;
 
 	/* Sysctls */
 	ixgbe_add_device_sysctls(ctx);
