@@ -51,7 +51,6 @@ __FBSDID("$FreeBSD$");
 #include <sys/taskqueue.h>
 #include <sys/limits.h>
 
-
 #include <net/if.h>
 #include <net/if_var.h>
 #include <net/if_types.h>
@@ -3805,20 +3804,7 @@ iflib_if_ioctl(if_t ifp, u_long command, caddr_t data)
 		CTX_UNLOCK(ctx);
 		break;
 	case SIOCSIFFLAGS:
-		CTX_LOCK(ctx);
-		if (if_getflags(ifp) & IFF_UP) {
-			if (if_getdrvflags(ifp) & IFF_DRV_RUNNING) {
-				if ((if_getflags(ifp) ^ ctx->ifc_if_flags) &
-				    (IFF_PROMISC | IFF_ALLMULTI)) {
-					err = IFDI_PROMISC_SET(ctx, if_getflags(ifp));
-				}
-			} else
-				reinit = 1;
-		} else if (if_getdrvflags(ifp) & IFF_DRV_RUNNING) {
-			iflib_stop(ctx);
-		}
-		ctx->ifc_if_flags = if_getflags(ifp);
-		CTX_UNLOCK(ctx);
+		err = async_if_ioctl(ctx, command, data);
 		break;
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
@@ -5151,6 +5137,32 @@ iflib_multi_set(if_ctx_t ctx, void *arg)
 	CTX_UNLOCK(ctx);
 }
 
+static void
+iflib_flags_set(if_ctx_t ctx, void *arg)
+{
+	int reinit, err;
+	if_t ifp = ctx->ifc_ifp;
+
+	err = reinit = 0;
+	CTX_LOCK(ctx);
+	if (if_getflags(ifp) & IFF_UP) {
+		if (if_getdrvflags(ifp) & IFF_DRV_RUNNING) {
+			if ((if_getflags(ifp) ^ ctx->ifc_if_flags) &
+			    (IFF_PROMISC | IFF_ALLMULTI)) {
+				err = IFDI_PROMISC_SET(ctx, if_getflags(ifp));
+			}
+		} else
+			reinit = 1;
+	} else if (if_getdrvflags(ifp) & IFF_DRV_RUNNING) {
+		iflib_stop(ctx);
+	}
+	ctx->ifc_if_flags = if_getflags(ifp);
+	if (reinit)
+		iflib_if_init_locked(ctx);
+	CTX_UNLOCK(ctx);
+	if (err)
+		log(LOG_WARNING, "IFDI_PROMISC_SET returned %d\n", err);
+}
 
 typedef void async_gtask_fn_t(if_ctx_t ctx, void *arg);
 
@@ -5203,6 +5215,9 @@ async_if_ioctl(if_ctx_t ctx, u_long command, caddr_t data)
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
 		rc = iflib_config_async_gtask_dispatch(ctx, iflib_multi_set, "async_if_multi", NULL);
+		break;
+	case SIOCSIFFLAGS:
+		rc = iflib_config_async_gtask_dispatch(ctx, iflib_flags_set, "async_if_flags", NULL);
 		break;
 	default:
 		panic("unknown command %lx", command);
