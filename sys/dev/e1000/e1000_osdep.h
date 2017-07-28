@@ -216,25 +216,15 @@ struct e1000_osdep
     bus_space_write_2(((struct e1000_osdep *)(hw)->back)->flash_bus_space_tag, \
         ((struct e1000_osdep *)(hw)->back)->flash_bus_space_handle, reg, value)
 
+
+#if defined(INVARIANTS)
 #include <sys/proc.h>
 
-#ifdef WITNESS
-int
-witness_list_locks(struct lock_list_entry **lock_list,
-		   int (*prnt)(const char *fmt, ...));
-#else
-static int
-witness_list_locks(struct lock_list_entry **lock_list,
-		   int (*prnt)(const char *fmt, ...)) { return (0) }
-#endif
-
-#ifdef INVARIANTS
 #define ASSERT_NO_LOCKS()				\
 	do {						\
 	     int unknown_locks = curthread->td_locks - mtx_owned(&Giant);	\
 	     if (unknown_locks > 0) {					\
-		     printf("locks held while none expected:\n");	\
-		     witness_list_locks(&curthread->td_sleeplocks, printf); \
+		     WITNESS_WARN(WARN_GIANTOK|WARN_SLEEPOK|WARN_PANIC, NULL, "unexpected non-sleepable lock"); \
 	     }								\
 	     MPASS(curthread->td_rw_rlocks == 0);			\
 	     MPASS(curthread->td_lk_slocks == 0);			\
