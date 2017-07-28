@@ -231,12 +231,13 @@ witness_list_locks(struct lock_list_entry **lock_list,
 #ifdef INVARIANTS
 #define ASSERT_NO_LOCKS()				\
 	do {						\
-		if (curthread->td_locks > 0) {				\
-			printf("locks held while none expected:\n");	\
-			witness_list_locks(&curthread->td_sleeplocks, printf); \
-		}							\
-		MPASS(curthread->td_rw_rlocks == 0);			\
-		MPASS(curthread->td_lk_slocks == 0);			\
+	     int unknown_locks = curthread->td_locks - mtx_owned(&Giant);	\
+	     if (unknown_locks > 0) {					\
+		     printf("locks held while none expected:\n");	\
+		     witness_list_locks(&curthread->td_sleeplocks, printf); \
+	     }								\
+	     MPASS(curthread->td_rw_rlocks == 0);			\
+	     MPASS(curthread->td_lk_slocks == 0);			\
 	} while (0)
 #else
 #define ASSERT_NO_LOCKS()
