@@ -157,7 +157,7 @@ struct iflib_ctx {
 	if_shared_ctx_t ifc_sctx;
 	struct if_softc_ctx ifc_softc_ctx;
 
-	struct mtx ifc_mtx;
+	struct sx ifc_sx;
 
 	uint16_t ifc_nhwtxqs;
 	uint16_t ifc_nhwrxqs;
@@ -527,12 +527,19 @@ rxd_info_zero(if_rxd_info_t ri)
 
 #define CTX_ACTIVE(ctx) ((if_getdrvflags((ctx)->ifc_ifp) & IFF_DRV_RUNNING))
 
+/*
 #define CTX_LOCK_INIT(_sc, _name)  mtx_init(&(_sc)->ifc_mtx, _name, "iflib ctx lock", MTX_DEF)
 
 #define CTX_LOCK(ctx) mtx_lock(&(ctx)->ifc_mtx)
 #define CTX_UNLOCK(ctx) mtx_unlock(&(ctx)->ifc_mtx)
 #define CTX_LOCK_DESTROY(ctx) mtx_destroy(&(ctx)->ifc_mtx)
+*/
 
+#define CTX_LOCK_INIT(_sc, _name)  sx_init(&(_sc)->ifc_sx, _name)
+
+#define CTX_LOCK(ctx) sx_xlock(&(ctx)->ifc_sx)
+#define CTX_UNLOCK(ctx) sx_xunlock(&(ctx)->ifc_sx)
+#define CTX_LOCK_DESTROY(ctx) sx_destroy(&(ctx)->ifc_sx)
 
 #define CALLOUT_LOCK(txq)	mtx_lock(&txq->ift_mtx)
 #define CALLOUT_UNLOCK(txq) 	mtx_unlock(&txq->ift_mtx)
@@ -711,6 +718,9 @@ static void iflib_ifmp_purge(iflib_txq_t txq);
 static void _iflib_pre_assert(if_softc_ctx_t scctx);
 static void iflib_stop(if_ctx_t ctx);
 static void iflib_if_init_locked(if_ctx_t ctx);
+static int async_if_ioctl(if_ctx_t ctx, u_long command, caddr_t data);
+
+
 #ifndef __NO_STRICT_ALIGNMENT
 static struct mbuf * iflib_fixup_rx(struct mbuf *m);
 #endif
@@ -3576,7 +3586,7 @@ _task_fn_admin(void *context)
 	CTX_UNLOCK(ctx);
 
 	IFDI_UPDATE_ADMIN_STATUS(ctx);
-	if (LINK_ACTIVE(ctx) == 0)
+	if (LINK_ACTIVE(ctx) == 0 || !running)
 		return;
 	for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_ntxqsets; i++, txq++)
 		iflib_txq_check_drain(txq, IFLIB_RESTART_BUDGET);
@@ -3813,11 +3823,7 @@ iflib_if_ioctl(if_t ifp, u_long command, caddr_t data)
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
 		if (if_getdrvflags(ifp) & IFF_DRV_RUNNING) {
-			CTX_LOCK(ctx);
-			IFDI_INTR_DISABLE(ctx);
-			IFDI_MULTI_SET(ctx);
-			IFDI_INTR_ENABLE(ctx);
-			CTX_UNLOCK(ctx);
+			err = async_if_ioctl(ctx, command, data);
 		}
 		break;
 	case SIOCSIFMEDIA:
@@ -5135,11 +5141,81 @@ iflib_config_gtask_init(if_ctx_t ctx, struct grouptask *gtask, gtask_fn_t *fn,
 	taskqgroup_attach(qgroup_if_config_tqg, gtask, gtask, -1, name);
 }
 
+static void
+iflib_multi_set(if_ctx_t ctx, void *arg)
+{
+	CTX_LOCK(ctx);
+	IFDI_INTR_DISABLE(ctx);
+	IFDI_MULTI_SET(ctx);
+	IFDI_INTR_ENABLE(ctx);
+	CTX_UNLOCK(ctx);
+}
+
+
+typedef void async_gtask_fn_t(if_ctx_t ctx, void *arg);
+
+struct async_task_arg {
+	async_gtask_fn_t *ata_fn;
+	if_ctx_t ata_ctx;
+	void *ata_arg;
+	struct grouptask *ata_gtask;
+};
+
+static void
+async_gtask(void *ctx)
+{
+	struct async_task_arg *at_arg = ctx;
+	if_ctx_t if_ctx = at_arg->ata_ctx;
+	void *arg = at_arg->ata_arg;
+
+	at_arg->ata_fn(if_ctx, arg);
+	taskqgroup_detach(qgroup_if_config_tqg, at_arg->ata_gtask);
+	free(at_arg->ata_gtask, M_IFLIB);
+}
+
+static int
+iflib_config_async_gtask_dispatch(if_ctx_t ctx, async_gtask_fn_t *fn, char *name, void *arg)
+{
+	struct grouptask *gtask;
+	struct async_task_arg *at_arg;
+
+	if ((gtask = malloc(sizeof(struct grouptask) + sizeof(struct async_task_arg), M_IFLIB, M_NOWAIT|M_ZERO)) == NULL)
+		return (ENOMEM);
+
+	at_arg = (struct async_task_arg *)(gtask + 1);
+	at_arg->ata_fn = fn;
+	at_arg->ata_ctx = ctx;
+	at_arg->ata_arg = arg;
+	at_arg->ata_gtask = gtask;
+
+	GROUPTASK_INIT(gtask, 0, async_gtask, at_arg);
+	taskqgroup_attach(qgroup_if_config_tqg, gtask, gtask, -1, name);
+	GROUPTASK_ENQUEUE(gtask);
+	return (0);
+}
+
+static int
+async_if_ioctl(if_ctx_t ctx, u_long command, caddr_t data)
+{
+	int rc;
+
+	switch (command) {
+	case SIOCADDMULTI:
+	case SIOCDELMULTI:
+		rc = iflib_config_async_gtask_dispatch(ctx, iflib_multi_set, "async_if_multi", NULL);
+		break;
+	default:
+		panic("unknown command %lx", command);
+	}
+	return (rc);
+}
+
+
 void
 iflib_config_gtask_deinit(struct grouptask *gtask)
 {
 
-	taskqgroup_detach(qgroup_if_config_tqg, gtask);	
+	taskqgroup_detach(qgroup_if_config_tqg, gtask);
 }
 
 void
@@ -5206,11 +5282,11 @@ iflib_add_int_delay_sysctl(if_ctx_t ctx, const char *name,
 	    info, 0, iflib_sysctl_int_delay, "I", description);
 }
 
-struct mtx *
+struct sx *
 iflib_ctx_lock_get(if_ctx_t ctx)
 {
 
-	return (&ctx->ifc_mtx);
+	return (&ctx->ifc_sx);
 }
 
 static int
