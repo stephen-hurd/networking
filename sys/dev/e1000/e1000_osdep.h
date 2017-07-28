@@ -217,15 +217,30 @@ struct e1000_osdep
         ((struct e1000_osdep *)(hw)->back)->flash_bus_space_handle, reg, value)
 
 #include <sys/proc.h>
+
+#ifdef WITNESS
+int
+witness_list_locks(struct lock_list_entry **lock_list,
+		   int (*prnt)(const char *fmt, ...));
+#else
+static int
+witness_list_locks(struct lock_list_entry **lock_list,
+		   int (*prnt)(const char *fmt, ...)) { return (0) }
+#endif
+
+#ifdef INVARIANTS
 #define ASSERT_NO_LOCKS()				\
 	do {						\
-		if (curthread->td_locks == 1)			\
-			mtx_assert(&Giant, MA_OWNED);		\
-		else						\
-			MPASS(curthread->td_locks == 0);	\
-		MPASS(curthread->td_rw_rlocks == 0);		\
-		MPASS(curthread->td_lk_slocks == 0);		\
+		if (curthread->td_locks > 0) {				\
+			printf("locks held while none expected:\n");	\
+			witness_list_locks(&curthread->td_sleeplocks, printf); \
+		}							\
+		MPASS(curthread->td_rw_rlocks == 0);			\
+		MPASS(curthread->td_lk_slocks == 0);			\
 	} while (0)
+#else
+#define ASSERT_NO_LOCKS()
+#endif
 
 #endif  /* _FREEBSD_OS_H_ */
 
