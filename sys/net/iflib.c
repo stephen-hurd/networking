@@ -2567,7 +2567,6 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 
 		/* will advance the cidx on the corresponding free lists */
 		m = iflib_rxd_pkt_get(rxq, &ri);
-		MPASS(m->m_pkthdr.len <= ifp->if_mtu + 14);
 		if (avail == 0 && budget_left)
 			avail = iflib_rxd_avail(ctx, rxq, *cidxp, budget_left);
 
@@ -2609,7 +2608,6 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 	if (rx_pkts) {
 		if_inc_counter(ifp, IFCOUNTER_IBYTES, rx_bytes);
 		if_inc_counter(ifp, IFCOUNTER_IPACKETS, rx_pkts);
-		MPASS((rx_bytes / rx_pkts) <= (ifp->if_mtu*rx_pkts + 14*rx_pkts));
 	}
 
 	/*
@@ -3770,7 +3768,7 @@ iflib_if_qflush(if_t ifp)
 
 
 #define IFCAP_FLAGS (IFCAP_TXCSUM_IPV6 | IFCAP_RXCSUM_IPV6 | IFCAP_HWCSUM | IFCAP_LRO | \
-		     IFCAP_TSO4 | IFCAP_TSO6 | IFCAP_VLAN_HWTAGGING |	\
+		     IFCAP_TSO4 | IFCAP_TSO6 | IFCAP_VLAN_HWTAGGING | IFCAP_HWSTATS | \
 		     IFCAP_VLAN_MTU | IFCAP_VLAN_HWFILTER | IFCAP_VLAN_HWTSO)
 
 static int
@@ -4127,7 +4125,7 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 #endif
 
 	if_setcapabilities(ifp, scctx->isc_capenable);
-	if_setcapenable(ifp, scctx->isc_capenable);
+	if_setcapenable(ifp, scctx->isc_capenable | IFCAP_HWSTATS);
 
 	if (scctx->isc_ntxqsets == 0 || (scctx->isc_ntxqsets_max && scctx->isc_ntxqsets_max < scctx->isc_ntxqsets))
 		scctx->isc_ntxqsets = scctx->isc_ntxqsets_max;
