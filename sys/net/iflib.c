@@ -2567,6 +2567,7 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 
 		/* will advance the cidx on the corresponding free lists */
 		m = iflib_rxd_pkt_get(rxq, &ri);
+		MPASS(m->m_pkthdr.len <= ifp->if_mtu + 14);
 		if (avail == 0 && budget_left)
 			avail = iflib_rxd_avail(ctx, rxq, *cidxp, budget_left);
 
@@ -2605,8 +2606,11 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 		ifp->if_input(ifp, m);
 	}
 
-	if_inc_counter(ifp, IFCOUNTER_IBYTES, rx_bytes);
-	if_inc_counter(ifp, IFCOUNTER_IPACKETS, rx_pkts);
+	if (rx_pkts) {
+		if_inc_counter(ifp, IFCOUNTER_IBYTES, rx_bytes);
+		if_inc_counter(ifp, IFCOUNTER_IPACKETS, rx_pkts);
+		MPASS((rx_bytes / rx_pkts) <= (ifp->if_mtu*rx_pkts + 14*rx_pkts));
+	}
 
 	/*
 	 * Flush any outstanding LRO work
