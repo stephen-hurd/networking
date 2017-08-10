@@ -39,6 +39,7 @@ SRCF+=		enable_execute_stack
 SRCF+=		eprintf
 SRCF+=		extendhfsf2
 SRCF+=		ffsdi2
+SRCF+=		ffssi2
 SRCF+=		ffsti2
 SRCF+=		fixdfdi
 SRCF+=		fixdfti
@@ -122,6 +123,11 @@ SRCF+=		udivmodti4
 SRCF+=		udivti3
 SRCF+=		umoddi3
 SRCF+=		umodti3
+
+# __cpu_model support, only used on x86
+.if ${MACHINE_CPUARCH} == "amd64" || ${MACHINE_CPUARCH} == "i386"
+SRCF+=		cpu_model
+.endif
 
 #
 # 128-bit quad precision long double support,
@@ -217,4 +223,10 @@ SRCS+=		switch32.S
 SRCS+=		switch8.S
 SRCS+=		switchu8.S
 SRCS+=		sync_synchronize.S
+.endif
+
+# On some archs GCC-6.3 requires bswap32 built-in.
+.if ${MACHINE_CPUARCH} == "mips" || ${MACHINE_CPUARCH} == "sparc64"
+SRCS+=		bswapdi2.c
+SRCS+=		bswapsi2.c
 .endif

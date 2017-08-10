@@ -1732,15 +1732,14 @@ witness_warn(int flags, struct lock_object *lock, const char *fmt, ...)
 				continue;
 			if (n == 0) {
 				va_start(ap, fmt);
-				witness_voutput(fmt, ap);
+				vprintf(fmt, ap);
 				va_end(ap);
-				witness_output(
-				    " with the following %slocks held:\n",
+				printf(" with the following %slocks held:\n",
 				    (flags & WARN_SLEEPOK) != 0 ?
 				    "non-sleepable " : "");
 			}
 			n++;
-			witness_list_lock(lock1, witness_output);
+			witness_list_lock(lock1, printf);
 		}
 
 	/*
@@ -1765,11 +1764,11 @@ witness_warn(int flags, struct lock_object *lock, const char *fmt, ...)
 			return (0);
 
 		va_start(ap, fmt);
-		witness_voutput(fmt, ap);
+		vprintf(fmt, ap);
 		va_end(ap);
-		witness_output(" with the following %slocks held:\n",
+		printf(" with the following %slocks held:\n",
 		    (flags & WARN_SLEEPOK) != 0 ?  "non-sleepable " : "");
-		n += witness_list_locks(&lock_list, witness_output);
+		n += witness_list_locks(&lock_list, printf);
 	} else
 		sched_unpin();
 	if (flags & WARN_PANIC && n)
@@ -1850,12 +1849,14 @@ enroll(const char *description, struct lock_class *lock_class)
 	return (w);
 found:
 	w->w_refcount++;
+	if (w->w_refcount == 1)
+		w->w_class = lock_class;
 	mtx_unlock_spin(&w_mtx);
 	if (lock_class != w->w_class)
 		kassert_panic(
-			"lock (%s) %s does not match earlier (%s) lock",
-			description, lock_class->lc_name,
-			w->w_class->lc_name);
+		    "lock (%s) %s does not match earlier (%s) lock",
+		    description, lock_class->lc_name,
+		    w->w_class->lc_name);
 	return (w);
 }
 

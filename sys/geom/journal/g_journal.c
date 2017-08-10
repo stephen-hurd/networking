@@ -130,26 +130,26 @@ SYSCTL_PROC(_kern_geom_journal, OID_AUTO, record_entries,
 SYSCTL_UINT(_kern_geom_journal, OID_AUTO, optimize, CTLFLAG_RW,
     &g_journal_do_optimize, 0, "Try to combine bios on flush and copy");
 
-static u_int g_journal_cache_used = 0;
-static u_int g_journal_cache_limit = 64 * 1024 * 1024;
+static u_long g_journal_cache_used = 0;
+static u_long g_journal_cache_limit = 64 * 1024 * 1024;
 static u_int g_journal_cache_divisor = 2;
 static u_int g_journal_cache_switch = 90;
 static u_int g_journal_cache_misses = 0;
 static u_int g_journal_cache_alloc_failures = 0;
-static u_int g_journal_cache_low = 0;
+static u_long g_journal_cache_low = 0;
 
 static SYSCTL_NODE(_kern_geom_journal, OID_AUTO, cache, CTLFLAG_RW, 0,
     "GEOM_JOURNAL cache");
-SYSCTL_UINT(_kern_geom_journal_cache, OID_AUTO, used, CTLFLAG_RD,
+SYSCTL_ULONG(_kern_geom_journal_cache, OID_AUTO, used, CTLFLAG_RD,
     &g_journal_cache_used, 0, "Number of allocated bytes");
 static int
 g_journal_cache_limit_sysctl(SYSCTL_HANDLER_ARGS)
 {
-	u_int limit;
+	u_long limit;
 	int error;
 
 	limit = g_journal_cache_limit;
-	error = sysctl_handle_int(oidp, &limit, 0, req);
+	error = sysctl_handle_long(oidp, &limit, 0, req);
 	if (error != 0 || req->newptr == NULL)
 		return (error);
 	g_journal_cache_limit = limit;
@@ -157,7 +157,7 @@ g_journal_cache_limit_sysctl(SYSCTL_HANDLER_ARGS)
 	return (0);
 }
 SYSCTL_PROC(_kern_geom_journal_cache, OID_AUTO, limit,
-    CTLTYPE_UINT | CTLFLAG_RWTUN, NULL, 0, g_journal_cache_limit_sysctl, "I",
+    CTLTYPE_ULONG | CTLFLAG_RWTUN, NULL, 0, g_journal_cache_limit_sysctl, "I",
     "Maximum number of allocated bytes");
 SYSCTL_UINT(_kern_geom_journal_cache, OID_AUTO, divisor, CTLFLAG_RDTUN,
     &g_journal_cache_divisor, 0,
@@ -227,11 +227,14 @@ struct g_class g_journal_class = {
 
 static int g_journal_destroy(struct g_journal_softc *sc);
 static void g_journal_metadata_update(struct g_journal_softc *sc);
+static void g_journal_start_switcher(struct g_class *mp);
+static void g_journal_stop_switcher(void);
 static void g_journal_switch_wait(struct g_journal_softc *sc);
 
 #define	GJ_SWITCHER_WORKING	0
 #define	GJ_SWITCHER_DIE		1
 #define	GJ_SWITCHER_DIED	2
+static struct proc *g_journal_switcher_proc = NULL;
 static int g_journal_switcher_state = GJ_SWITCHER_WORKING;
 static int g_journal_switcher_wokenup = 0;
 static int g_journal_sync_requested = 0;
@@ -1258,7 +1261,7 @@ g_journal_flush(struct g_journal_softc *sc)
 	strlcpy(hdr.jrh_magic, GJ_RECORD_HEADER_MAGIC, sizeof(hdr.jrh_magic));
 
 	bioq = &sc->sc_active.jj_queue;
-	pbp = sc->sc_flush_queue;
+	GJQ_LAST(sc->sc_flush_queue, pbp);
 
 	fbp = g_alloc_bio();
 	fbp->bio_parent = NULL;
@@ -2383,6 +2386,10 @@ g_journal_create(struct g_class *mp, struct g_provider *pp,
 		sc->sc_jconsumer = cp;
 	}
 
+	/* Start switcher kproc if needed. */
+	if (g_journal_switcher_proc == NULL)
+		g_journal_start_switcher(mp);
+
 	if ((sc->sc_type & GJ_TYPE_COMPLETE) != GJ_TYPE_COMPLETE) {
 		/* Journal is not complete yet. */
 		return (gp);
@@ -2759,7 +2766,6 @@ static void g_journal_switcher(void *arg);
 static void
 g_journal_init(struct g_class *mp)
 {
-	int error;
 
 	/* Pick a conservative value if provided value sucks. */
 	if (g_journal_cache_divisor <= 0 ||
@@ -2779,9 +2785,6 @@ g_journal_init(struct g_class *mp)
 	    g_journal_lowmem, mp, EVENTHANDLER_PRI_FIRST);
 	if (g_journal_event_lowmem == NULL)
 		GJ_DEBUG(0, "Warning! Cannot register lowmem event.");
-	error = kproc_create(g_journal_switcher, mp, NULL, 0, 0,
-	    "g_journal switcher");
-	KASSERT(error == 0, ("Cannot create switcher thread."));
 }
 
 static void
@@ -2794,11 +2797,7 @@ g_journal_fini(struct g_class *mp)
 	}
 	if (g_journal_event_lowmem != NULL)
 		EVENTHANDLER_DEREGISTER(vm_lowmem, g_journal_event_lowmem);
-	g_journal_switcher_state = GJ_SWITCHER_DIE;
-	wakeup(&g_journal_switcher_state);
-	while (g_journal_switcher_state != GJ_SWITCHER_DIED)
-		tsleep(&g_journal_switcher_state, PRIBIO, "jfini:wait", hz / 5);
-	GJ_DEBUG(1, "Switcher died.");
+	g_journal_stop_switcher();
 }
 
 DECLARE_GEOM_CLASS(g_journal_class, g_journal);
@@ -2998,9 +2997,34 @@ next:
 	}
 }
 
+static void
+g_journal_start_switcher(struct g_class *mp)
+{
+	int error;
+
+	g_topology_assert();
+	MPASS(g_journal_switcher_proc == NULL);
+	g_journal_switcher_state = GJ_SWITCHER_WORKING;
+	error = kproc_create(g_journal_switcher, mp, &g_journal_switcher_proc,
+	    0, 0, "g_journal switcher");
+	KASSERT(error == 0, ("Cannot create switcher thread."));
+}
+
+static void
+g_journal_stop_switcher(void)
+{
+	g_topology_assert();
+	MPASS(g_journal_switcher_proc != NULL);
+	g_journal_switcher_state = GJ_SWITCHER_DIE;
+	wakeup(&g_journal_switcher_state);
+	while (g_journal_switcher_state != GJ_SWITCHER_DIED)
+		tsleep(&g_journal_switcher_state, PRIBIO, "jfini:wait", hz / 5);
+	GJ_DEBUG(1, "Switcher died.");
+	g_journal_switcher_proc = NULL;
+}
+
 /*
- * TODO: Switcher thread should be started on first geom creation and killed on
- * last geom destruction.
+ * TODO: Kill switcher thread on last geom destruction?
  */
 static void
 g_journal_switcher(void *arg)
@@ -3022,9 +3046,9 @@ g_journal_switcher(void *arg)
 			kproc_exit(0);
 		}
 		if (error == 0 && g_journal_sync_requested == 0) {
-			GJ_DEBUG(1, "Out of cache, force switch (used=%u "
-			    "limit=%u).", g_journal_cache_used,
-			    g_journal_cache_limit);
+			GJ_DEBUG(1, "Out of cache, force switch (used=%jd "
+			    "limit=%jd).", (intmax_t)g_journal_cache_used,
+			    (intmax_t)g_journal_cache_limit);
 		}
 		GJ_TIMER_START(1, &bt);
 		g_journal_do_switch(mp);

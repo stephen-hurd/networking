@@ -65,9 +65,11 @@ __FBSDID("$FreeBSD$");
 
 #include "pic_if.h"
 
+#include <arm/arm/gic_common.h>
 #include "gic_v3_reg.h"
 #include "gic_v3_var.h"
 
+static bus_get_domain_t gic_v3_get_domain;
 static bus_read_ivar_t gic_v3_read_ivar;
 
 static pic_disable_intr_t gic_v3_disable_intr;
@@ -96,6 +98,7 @@ static device_method_t gic_v3_methods[] = {
 	DEVMETHOD(device_detach,	gic_v3_detach),
 
 	/* Bus interface */
+	DEVMETHOD(bus_get_domain,	gic_v3_get_domain),
 	DEVMETHOD(bus_read_ivar,	gic_v3_read_ivar),
 
 	/* Interrupt controller interface */
@@ -296,6 +299,13 @@ gic_v3_attach(device_t dev)
 		}
 	}
 
+	/*
+	 * Read the Peripheral ID2 register. This is an implementation
+	 * defined register, but seems to be implemented in all GICv3
+	 * parts and Linux expects it to be there.
+	 */
+	sc->gic_pidr2 = gic_d_read(sc, 4, GICD_PIDR2);
+
 	/* Get the number of supported interrupt identifier bits */
 	sc->gic_idbits = GICD_TYPER_IDBITS(typer);
 
@@ -343,6 +353,19 @@ gic_v3_detach(device_t dev)
 }
 
 static int
+gic_v3_get_domain(device_t dev, device_t child, int *domain)
+{
+	struct gic_v3_devinfo *di;
+
+	di = device_get_ivars(child);
+	if (di->gic_domain < 0)
+		return (ENOENT);
+
+	*domain = di->gic_domain;
+	return (0);
+}
+
+static int
 gic_v3_read_ivar(device_t dev, device_t child, int which, uintptr_t *result)
 {
 	struct gic_v3_softc *sc;
@@ -356,6 +379,21 @@ gic_v3_read_ivar(device_t dev, device_t child, int which, uintptr_t *result)
 	case GICV3_IVAR_REDIST_VADDR:
 		*result = (uintptr_t)rman_get_virtual(
 		    sc->gic_redists.pcpu[PCPU_GET(cpuid)]);
+		return (0);
+	case GIC_IVAR_HW_REV:
+		KASSERT(
+		    GICR_PIDR2_ARCH(sc->gic_pidr2) == GICR_PIDR2_ARCH_GICv3 ||
+		    GICR_PIDR2_ARCH(sc->gic_pidr2) == GICR_PIDR2_ARCH_GICv4,
+		    ("gic_v3_read_ivar: Invalid GIC architecture: %d (%.08X)",
+		     GICR_PIDR2_ARCH(sc->gic_pidr2), sc->gic_pidr2));
+		*result = GICR_PIDR2_ARCH(sc->gic_pidr2);
+		return (0);
+	case GIC_IVAR_BUS:
+		KASSERT(sc->gic_bus != GIC_BUS_UNKNOWN,
+		    ("gic_v3_read_ivar: Unknown bus type"));
+		KASSERT(sc->gic_bus <= GIC_BUS_MAX,
+		    ("gic_v3_read_ivar: Invalid bus type %u", sc->gic_bus));
+		*result = sc->gic_bus;
 		return (0);
 	}
 
@@ -414,11 +452,11 @@ arm_gic_v3_intr(void *arg)
 #endif
 		} else if (active_irq >= GIC_FIRST_PPI &&
 		    active_irq <= GIC_LAST_SPI) {
-			if (gi->gi_pol == INTR_TRIGGER_EDGE)
+			if (gi->gi_trig == INTR_TRIGGER_EDGE)
 				gic_icc_write(EOIR1, gi->gi_irq);
 
 			if (intr_isrc_dispatch(&gi->gi_isrc, tf) != 0) {
-				if (gi->gi_pol != INTR_TRIGGER_EDGE)
+				if (gi->gi_trig != INTR_TRIGGER_EDGE)
 					gic_icc_write(EOIR1, gi->gi_irq);
 				gic_v3_disable_intr(sc->dev, &gi->gi_isrc);
 				device_printf(sc->dev,
@@ -758,7 +796,7 @@ gic_v3_post_filter(device_t dev, struct intr_irqsrc *isrc)
 {
 	struct gic_v3_irqsrc *gi = (struct gic_v3_irqsrc *)isrc;
 
-	if (gi->gi_pol == INTR_TRIGGER_EDGE)
+	if (gi->gi_trig == INTR_TRIGGER_EDGE)
 		return;
 
 	gic_icc_write(EOIR1, gi->gi_irq);
@@ -1017,6 +1055,10 @@ gic_v3_dist_init(struct gic_v3_softc *sc)
 	/*
 	 * 2. Configure the Distributor
 	 */
+	/* Set all SPIs to be Group 1 Non-secure */
+	for (i = GIC_FIRST_SPI; i < sc->gic_nirqs; i += GICD_I_PER_IGROUPRn)
+		gic_d_write(sc, 4, GICD_IGROUPR(i), 0xFFFFFFFF);
+
 	/* Set all global interrupts to be level triggered, active low. */
 	for (i = GIC_FIRST_SPI; i < sc->gic_nirqs; i += GICD_I_PER_ICFGRn)
 		gic_d_write(sc, 4, GICD_ICFGR(i), 0x00000000);
@@ -1100,7 +1142,7 @@ gic_v3_redist_find(struct gic_v3_softc *sc)
 		r_bsh = rman_get_bushandle(&r_res);
 
 		pidr2 = bus_read_4(&r_res, GICR_PIDR2);
-		switch (pidr2 & GICR_PIDR2_ARCH_MASK) {
+		switch (GICR_PIDR2_ARCH(pidr2)) {
 		case GICR_PIDR2_ARCH_GICv3: /* fall through */
 		case GICR_PIDR2_ARCH_GICv4:
 			break;
@@ -1182,6 +1224,10 @@ gic_v3_redist_init(struct gic_v3_softc *sc)
 	err = gic_v3_redist_wake(sc);
 	if (err != 0)
 		return (err);
+
+	/* Configure SGIs and PPIs to be Group1 Non-secure */
+	gic_r_write(sc, 4, GICR_SGI_BASE_SIZE + GICR_IGROUPR0,
+	    0xFFFFFFFF);
 
 	/* Disable SPIs */
 	gic_r_write(sc, 4, GICR_SGI_BASE_SIZE + GICR_ICENABLER0,

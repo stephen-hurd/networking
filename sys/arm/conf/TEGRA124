@@ -25,8 +25,6 @@ ident		TEGRA124
 
 options 	SCHED_ULE		# ULE scheduler
 options 	PLATFORM		# Platform based SoC
-options 	PLATFORM_SMP
-options  	MULTIDELAY
 options 	SMP			# Enable multiple cores
 options 	LINUX_BOOT_ABI
 
@@ -123,11 +121,10 @@ device		pci
 device		re			# RealTek 8139C+/8169/8169S/8110S
 
 # DRM2
-#device		fbd
-#device		vt
-#device		splash
-#device		kbdmux
-#device		drm2
+device		fbd
+device		vt
+device		kbdmux
+device		drm2
 
 # Sound
 #device		sound

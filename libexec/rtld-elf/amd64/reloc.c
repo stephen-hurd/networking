@@ -387,6 +387,20 @@ reloc_jmpslots(Obj_Entry *obj, int flags, RtldLockState *lockstate)
     return 0;
 }
 
+/* Fixup the jump slot at "where" to transfer control to "target". */
+Elf_Addr
+reloc_jmpslot(Elf_Addr *where, Elf_Addr target,
+    const struct Struct_Obj_Entry *obj, const struct Struct_Obj_Entry *refobj,
+    const Elf_Rel *rel)
+{
+#ifdef dbg
+	dbg("reloc_jmpslot: *%p = %p", where, (void *)target);
+#endif
+	if (!ld_bind_not)
+		*where = target;
+	return (target);
+}
+
 int
 reloc_iresolve(Obj_Entry *obj, RtldLockState *lockstate)
 {
@@ -454,7 +468,7 @@ reloc_gnu_ifunc(Obj_Entry *obj, int flags, RtldLockState *lockstate)
 uint32_t cpu_feature, cpu_feature2, cpu_stdext_feature, cpu_stdext_feature2;
 
 void
-ifunc_init(Elf_Auxinfo aux_info[static AT_COUNT] __unused)
+ifunc_init(Elf_Auxinfo aux_info[__min_size(AT_COUNT)] __unused)
 {
 	u_int p[4], cpu_high;
 

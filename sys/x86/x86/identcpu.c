@@ -67,10 +67,6 @@ __FBSDID("$FreeBSD$");
 #include <x86/vmware.h>
 
 #ifdef __i386__
-#if !defined(CPU_DISABLE_SSE) && defined(I686_CPU)
-#define CPU_ENABLE_SSE
-#endif
-
 #define	IDENTBLUE_CYRIX486	0
 #define	IDENTBLUE_IBMCPU	1
 #define	IDENTBLUE_CYRIXM2	2
@@ -105,10 +101,8 @@ u_int	cpu_procinfo;		/* HyperThreading Info / Brand Index / CLFUSH */
 u_int	cpu_procinfo2;		/* Multicore info */
 char	cpu_vendor[20];		/* CPU Origin code */
 u_int	cpu_vendor_id;		/* CPU vendor ID */
-#if defined(__amd64__) || defined(CPU_ENABLE_SSE)
 u_int	cpu_fxsr;		/* SSE enabled */
 u_int	cpu_mxcsr_mask;		/* Valid bits in mxcsr */
-#endif
 u_int	cpu_clflush_line_size = 32;
 u_int	cpu_stdext_feature;
 u_int	cpu_stdext_feature2;
@@ -912,7 +906,7 @@ printcpuinfo(void)
 				"\033DBE"	/* Data Breakpoint extension */
 				"\034PTSC"	/* Performance TSC */
 				"\035PL2I"	/* L2I perf count */
-				"\036<b29>"
+				"\036MWAITX"	/* MONITORX/MWAITX instructions */
 				"\037<b30>"
 				"\040<b31>"
 				);
@@ -1258,7 +1252,7 @@ static const char *const vm_pnames[] = {
 	NULL
 };
 
-static void
+void
 identify_hypervisor(void)
 {
 	u_int regs[4];
@@ -1288,6 +1282,8 @@ identify_hypervisor(void)
 				vm_guest = VM_GUEST_HV;
 			else if (strcmp(hv_vendor, "KVMKVMKVM") == 0)
 				vm_guest = VM_GUEST_KVM;
+			else if (strcmp(hv_vendor, "bhyve bhyve") == 0)
+				vm_guest = VM_GUEST_BHYVE;
 		}
 		return;
 	}
@@ -1376,23 +1372,12 @@ fix_cpuid(void)
 	return (false);
 }
 
-/*
- * Final stage of CPU identification.
- */
-#ifdef __i386__
-void
-finishidentcpu(void)
-#else
+#ifdef __amd64__
 void
 identify_cpu(void)
-#endif
 {
-	u_int regs[4], cpu_stdext_disable;
-#ifdef __i386__
-	u_char ccr3;
-#endif
+	u_int regs[4];
 
-#ifdef __amd64__
 	do_cpuid(0, regs);
 	cpu_high = regs[0];
 	((u_int *)&cpu_vendor)[0] = regs[1];
@@ -1405,9 +1390,20 @@ identify_cpu(void)
 	cpu_procinfo = regs[1];
 	cpu_feature = regs[3];
 	cpu_feature2 = regs[2];
+}
 #endif
 
-	identify_hypervisor();
+/*
+ * Final stage of CPU identification.
+ */
+void
+finishidentcpu(void)
+{
+	u_int regs[4], cpu_stdext_disable;
+#ifdef __i386__
+	u_char ccr3;
+#endif
+
 	cpu_vendor_id = find_cpu_vendor_id();
 
 	if (fix_cpuid()) {

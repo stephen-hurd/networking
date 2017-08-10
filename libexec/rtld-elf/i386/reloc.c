@@ -33,7 +33,6 @@
 
 #include <sys/param.h>
 #include <sys/mman.h>
-#include <machine/cpufunc.h>
 #include <machine/segments.h>
 #include <machine/sysarch.h>
 
@@ -345,6 +344,20 @@ reloc_jmpslots(Obj_Entry *obj, int flags, RtldLockState *lockstate)
     return 0;
 }
 
+/* Fixup the jump slot at "where" to transfer control to "target". */
+Elf_Addr
+reloc_jmpslot(Elf_Addr *where, Elf_Addr target,
+    const struct Struct_Obj_Entry *obj, const struct Struct_Obj_Entry *refobj,
+    const Elf_Rel *rel)
+{
+#ifdef dbg
+	dbg("reloc_jmpslot: *%p = %p", where, (void *)target);
+#endif
+	if (!ld_bind_not)
+		*where = target;
+	return (target);
+}
+
 int
 reloc_iresolve(Obj_Entry *obj, RtldLockState *lockstate)
 {
@@ -407,8 +420,21 @@ reloc_gnu_ifunc(Obj_Entry *obj, int flags, RtldLockState *lockstate)
 
 uint32_t cpu_feature, cpu_feature2, cpu_stdext_feature, cpu_stdext_feature2;
 
+static void
+rtld_cpuid_count(int idx, int cnt, u_int *p)
+{
+
+	__asm __volatile(
+	    "	pushl	%%ebx\n"
+	    "	cpuid\n"
+	    "	movl	%%ebx,%1\n"
+	    "	popl	%%ebx\n"
+	    : "=a" (p[0]), "=r" (p[1]), "=c" (p[2]), "=d" (p[3])
+	    :  "0" (idx), "2" (cnt));
+}
+
 void
-ifunc_init(Elf_Auxinfo aux_info[static AT_COUNT] __unused)
+ifunc_init(Elf_Auxinfo aux_info[__min_size(AT_COUNT)] __unused)
 {
 	u_int p[4], cpu_high;
 	int cpuid_supported;
@@ -432,13 +458,13 @@ ifunc_init(Elf_Auxinfo aux_info[static AT_COUNT] __unused)
 	if (!cpuid_supported)
 		return;
 
-	do_cpuid(1, p);
+	rtld_cpuid_count(1, 0, p);
 	cpu_feature = p[3];
 	cpu_feature2 = p[2];
-	do_cpuid(0, p);
+	rtld_cpuid_count(0, 0, p);
 	cpu_high = p[0];
 	if (cpu_high >= 7) {
-		cpuid_count(7, 0, p);
+		rtld_cpuid_count(7, 0, p);
 		cpu_stdext_feature = p[1];
 		cpu_stdext_feature2 = p[2];
 	}

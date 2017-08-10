@@ -478,7 +478,7 @@ DEFINE_LIBUNWIND_PRIVATE_FUNCTION(_ZN9libunwind14Registers_or1k6jumptoEv)
   l.jr     r9
    l.nop
 
-#elif defined(__riscv__)
+#elif defined(__riscv)
 
 //
 // void libunwind::Registers_riscv::jumpto()
@@ -527,3 +527,5 @@ DEFINE_LIBUNWIND_PRIVATE_FUNCTION(_ZN9libunwind15Registers_riscv6jumptoEv)
   ret                       // jump to ra
 
 #endif
+
+  .section .note.GNU-stack,"",@progbits

@@ -52,11 +52,23 @@ __FBSDID("$FreeBSD$");
 #include <machine/machdep.h>
 #include <machine/platformvar.h>
 
+#include <arm/ti/omap4/omap4_machdep.h>
 #include <arm/ti/omap4/omap4_reg.h>
-#include <arm/ti/omap4/omap4_mp.h>
 #include <arm/ti/ti_cpuid.h>
 
 #include "platform_if.h"
+
+#if defined(SOC_OMAP4)
+#include "platform_pl310_if.h"
+
+static platform_attach_t omap4_attach;
+static platform_devmap_init_t ti_omap4_devmap_init;
+#endif
+#if defined(SOC_TI_AM335X)
+static platform_attach_t ti_am335x_attach;
+static platform_devmap_init_t ti_am335x_devmap_init;
+#endif
+static platform_cpu_reset_t ti_plat_cpu_reset;
 
 void (*ti_cpu_reset)(void) = NULL;
 
@@ -79,13 +91,6 @@ ti_am335x_attach(platform_t plat)
 	return (0);
 }
 #endif
-
-static vm_offset_t
-ti_lastaddr(platform_t plat)
-{
-
-	return (devmap_lastaddr());
-}
 
 /*
  * Construct static devmap entries to map out the most frequently used
@@ -130,13 +135,17 @@ ti_plat_cpu_reset(platform_t plat)
 static platform_method_t omap4_methods[] = {
 	PLATFORMMETHOD(platform_attach, 	omap4_attach),
 	PLATFORMMETHOD(platform_devmap_init,	ti_omap4_devmap_init),
-	PLATFORMMETHOD(platform_lastaddr,	ti_lastaddr),
 	PLATFORMMETHOD(platform_cpu_reset,	ti_plat_cpu_reset),
 
 #ifdef SMP
 	PLATFORMMETHOD(platform_mp_start_ap,	omap4_mp_start_ap),
 	PLATFORMMETHOD(platform_mp_setmaxid,	omap4_mp_setmaxid),
 #endif
+
+	PLATFORMMETHOD(platform_pl310_init,	omap4_pl310_init),
+	PLATFORMMETHOD(platform_pl310_write_ctrl, omap4_pl310_write_ctrl),
+	PLATFORMMETHOD(platform_pl310_write_debug, omap4_pl310_write_debug),
+
 	PLATFORMMETHOD_END,
 };
 FDT_PLATFORM_DEF(omap4, "omap4", 0, "ti,omap4430", 200);
@@ -146,7 +155,6 @@ FDT_PLATFORM_DEF(omap4, "omap4", 0, "ti,omap4430", 200);
 static platform_method_t am335x_methods[] = {
 	PLATFORMMETHOD(platform_attach, 	ti_am335x_attach),
 	PLATFORMMETHOD(platform_devmap_init,	ti_am335x_devmap_init),
-	PLATFORMMETHOD(platform_lastaddr,	ti_lastaddr),
 	PLATFORMMETHOD(platform_cpu_reset,	ti_plat_cpu_reset),
 
 	PLATFORMMETHOD_END,

@@ -71,6 +71,7 @@ struct vmbus_msghc {
 	struct hypercall_postmsg_in	mh_inprm_save;
 };
 
+static void			vmbus_identify(driver_t *, device_t);
 static int			vmbus_probe(device_t);
 static int			vmbus_attach(device_t);
 static int			vmbus_detach(device_t);
@@ -97,6 +98,11 @@ static int			vmbus_probe_guid_method(device_t, device_t,
 				    const struct hyperv_guid *);
 static uint32_t			vmbus_get_vcpu_id_method(device_t bus,
 				    device_t dev, int cpu);
+static struct taskqueue		*vmbus_get_eventtq_method(device_t, device_t,
+				    int);
+#ifdef EARLY_AP_STARTUP
+static void			vmbus_intrhook(void *);
+#endif
 
 static int			vmbus_init(struct vmbus_softc *);
 static int			vmbus_connect(struct vmbus_softc *, uint32_t);
@@ -139,6 +145,7 @@ vmbus_chanmsg_handlers[VMBUS_CHANMSG_TYPE_MAX] = {
 
 static device_method_t vmbus_methods[] = {
 	/* Device interface */
+	DEVMETHOD(device_identify,		vmbus_identify),
 	DEVMETHOD(device_probe,			vmbus_probe),
 	DEVMETHOD(device_attach,		vmbus_attach),
 	DEVMETHOD(device_detach,		vmbus_detach),
@@ -172,6 +179,7 @@ static device_method_t vmbus_methods[] = {
 	DEVMETHOD(vmbus_get_version,		vmbus_get_version_method),
 	DEVMETHOD(vmbus_probe_guid,		vmbus_probe_guid_method),
 	DEVMETHOD(vmbus_get_vcpu_id,		vmbus_get_vcpu_id_method),
+	DEVMETHOD(vmbus_get_event_taskq,	vmbus_get_eventtq_method),
 
 	DEVMETHOD_END
 };
@@ -184,7 +192,10 @@ static driver_t vmbus_driver = {
 
 static devclass_t vmbus_devclass;
 
-DRIVER_MODULE(vmbus, acpi, vmbus_driver, vmbus_devclass, NULL, NULL);
+DRIVER_MODULE(vmbus, pcib, vmbus_driver, vmbus_devclass, NULL, NULL);
+DRIVER_MODULE(vmbus, acpi_syscontainer, vmbus_driver, vmbus_devclass,
+    NULL, NULL);
+
 MODULE_DEPEND(vmbus, acpi, 1, 1, 1);
 MODULE_DEPEND(vmbus, pci, 1, 1, 1);
 MODULE_VERSION(vmbus, 1);
@@ -307,12 +318,27 @@ vmbus_msghc_exec(struct vmbus_softc *sc __unused, struct vmbus_msghc *mh)
 	return error;
 }
 
+void
+vmbus_msghc_exec_cancel(struct vmbus_softc *sc __unused, struct vmbus_msghc *mh)
+{
+
+	vmbus_xact_deactivate(mh->mh_xact);
+}
+
 const struct vmbus_message *
 vmbus_msghc_wait_result(struct vmbus_softc *sc __unused, struct vmbus_msghc *mh)
 {
 	size_t resp_len;
 
 	return (vmbus_xact_wait(mh->mh_xact, &resp_len));
+}
+
+const struct vmbus_message *
+vmbus_msghc_poll_result(struct vmbus_softc *sc __unused, struct vmbus_msghc *mh)
+{
+	size_t resp_len;
+
+	return (vmbus_xact_poll(mh->mh_xact, &resp_len));
 }
 
 void
@@ -325,7 +351,13 @@ vmbus_msghc_wakeup(struct vmbus_softc *sc, const struct vmbus_message *msg)
 uint32_t
 vmbus_gpadl_alloc(struct vmbus_softc *sc)
 {
-	return atomic_fetchadd_int(&sc->vmbus_gpadl, 1);
+	uint32_t gpadl;
+
+again:
+	gpadl = atomic_fetchadd_int(&sc->vmbus_gpadl, 1); 
+	if (gpadl == 0)
+		goto again;
+	return (gpadl);
 }
 
 static int
@@ -1020,57 +1052,60 @@ static struct resource *
 vmbus_alloc_resource(device_t dev, device_t child, int type, int *rid,
     rman_res_t start, rman_res_t end, rman_res_t count, u_int flags)
 {
-	struct vmbus_softc *sc = device_get_softc(dev);
 	device_t parent = device_get_parent(dev);
 	struct resource *res;
 
-	if (type != SYS_RES_MEMORY)
-		res = BUS_ALLOC_RESOURCE(parent, child, type, rid, start,
-		    end, count, flags);
-	else
+#ifdef NEW_PCIB
+	if (type == SYS_RES_MEMORY) {
+		struct vmbus_softc *sc = device_get_softc(dev);
+
 		res = pcib_host_res_alloc(&sc->vmbus_mmio_res, child, type,
 		    rid, start, end, count, flags);
+	} else
+#endif
+	{
+		res = BUS_ALLOC_RESOURCE(parent, child, type, rid, start,
+		    end, count, flags);
+	}
 
 	return (res);
-}
-
-static device_t
-get_nexus(device_t vmbus)
-{
-	device_t acpi = device_get_parent(vmbus);
-	device_t nexus = device_get_parent(acpi);
-	return (nexus);
 }
 
 static int
 vmbus_alloc_msi(device_t bus, device_t dev, int count, int maxcount, int *irqs)
 {
-	return (PCIB_ALLOC_MSI(get_nexus(bus), dev, count, maxcount, irqs));
+
+	return (PCIB_ALLOC_MSI(device_get_parent(bus), dev, count, maxcount,
+	    irqs));
 }
 
 static int
 vmbus_release_msi(device_t bus, device_t dev, int count, int *irqs)
 {
-	return (PCIB_RELEASE_MSI(get_nexus(bus), dev, count, irqs));
+
+	return (PCIB_RELEASE_MSI(device_get_parent(bus), dev, count, irqs));
 }
 
 static int
 vmbus_alloc_msix(device_t bus, device_t dev, int *irq)
 {
-	return (PCIB_ALLOC_MSIX(get_nexus(bus), dev, irq));
+
+	return (PCIB_ALLOC_MSIX(device_get_parent(bus), dev, irq));
 }
 
 static int
 vmbus_release_msix(device_t bus, device_t dev, int irq)
 {
-	return (PCIB_RELEASE_MSIX(get_nexus(bus), dev, irq));
+
+	return (PCIB_RELEASE_MSIX(device_get_parent(bus), dev, irq));
 }
 
 static int
 vmbus_map_msi(device_t bus, device_t dev, int irq, uint64_t *addr,
 	uint32_t *data)
 {
-	return (PCIB_MAP_MSI(get_nexus(bus), dev, irq, addr, data));
+
+	return (PCIB_MAP_MSI(device_get_parent(bus), dev, irq, addr, data));
 }
 
 static uint32_t
@@ -1100,6 +1135,16 @@ vmbus_get_vcpu_id_method(device_t bus, device_t dev, int cpu)
 	return (VMBUS_PCPU_GET(sc, vcpuid, cpu));
 }
 
+static struct taskqueue *
+vmbus_get_eventtq_method(device_t bus, device_t dev __unused, int cpu)
+{
+	const struct vmbus_softc *sc = device_get_softc(bus);
+
+	KASSERT(cpu >= 0 && cpu < mp_ncpus, ("invalid cpu%d", cpu));
+	return (VMBUS_PCPU_GET(sc, event_tq, cpu));
+}
+
+#ifdef NEW_PCIB
 #define VTPM_BASE_ADDR 0xfed40000
 #define FOUR_GB (1ULL << 32)
 
@@ -1174,36 +1219,44 @@ vmbus_get_crs(device_t dev, device_t vmbus_dev, enum parse_pass pass)
 static void
 vmbus_get_mmio_res_pass(device_t dev, enum parse_pass pass)
 {
-	device_t acpi0, pcib0 = NULL;
-	device_t *children;
-	int i, count;
+	device_t acpi0, parent;
 
-	/* Try to find _CRS on VMBus device */
-	vmbus_get_crs(dev, dev, pass);
+	parent = device_get_parent(dev);
 
-	/* Try to find _CRS on VMBus device's parent */
-	acpi0 = device_get_parent(dev);
-	vmbus_get_crs(acpi0, dev, pass);
+	acpi0 = device_get_parent(parent);
+	if (strcmp("acpi0", device_get_nameunit(acpi0)) == 0) {
+		device_t *children;
+		int count;
 
-	/* Try to locate pcib0 and find _CRS on it */
-	if (device_get_children(acpi0, &children, &count) != 0)
-		return;
+		/*
+		 * Try to locate VMBUS resources and find _CRS on them.
+		 */
+		if (device_get_children(acpi0, &children, &count) == 0) {
+			int i;
 
-	for (i = 0; i < count; i++) {
-		if (!device_is_attached(children[i]))
-			continue;
+			for (i = 0; i < count; ++i) {
+				if (!device_is_attached(children[i]))
+					continue;
 
-		if (strcmp("pcib0", device_get_nameunit(children[i])))
-			continue;
+				if (strcmp("vmbus_res",
+				    device_get_name(children[i])) == 0)
+					vmbus_get_crs(children[i], dev, pass);
+			}
+			free(children, M_TEMP);
+		}
 
-		pcib0 = children[i];
-		break;
+		/*
+		 * Try to find _CRS on acpi.
+		 */
+		vmbus_get_crs(acpi0, dev, pass);
+	} else {
+		device_printf(dev, "not grandchild of acpi\n");
 	}
 
-	if (pcib0)
-		vmbus_get_crs(pcib0, dev, pass);
-
-	free(children, M_TEMP);
+	/*
+	 * Try to find _CRS on parent.
+	 */
+	vmbus_get_crs(parent, dev, pass);
 }
 
 static void
@@ -1231,19 +1284,27 @@ vmbus_free_mmio_res(device_t dev)
 
 	pcib_host_res_free(dev, &sc->vmbus_mmio_res);
 }
+#endif	/* NEW_PCIB */
+
+static void
+vmbus_identify(driver_t *driver, device_t parent)
+{
+
+	if (device_get_unit(parent) != 0 || vm_guest != VM_GUEST_HV ||
+	    (hyperv_features & CPUID_HV_MSR_SYNIC) == 0)
+		return;
+	device_add_child(parent, "vmbus", -1);
+}
 
 static int
 vmbus_probe(device_t dev)
 {
-	char *id[] = { "VMBUS", NULL };
 
-	if (ACPI_ID_PROBE(device_get_parent(dev), dev, id) == NULL ||
-	    device_get_unit(dev) != 0 || vm_guest != VM_GUEST_HV ||
+	if (device_get_unit(dev) != 0 || vm_guest != VM_GUEST_HV ||
 	    (hyperv_features & CPUID_HV_MSR_SYNIC) == 0)
 		return (ENXIO);
 
 	device_set_desc(dev, "Hyper-V Vmbus");
-
 	return (BUS_PROBE_DEFAULT);
 }
 
@@ -1269,7 +1330,9 @@ vmbus_doattach(struct vmbus_softc *sc)
 	if (sc->vmbus_flags & VMBUS_FLAG_ATTACHED)
 		return (0);
 
+#ifdef NEW_PCIB
 	vmbus_get_mmio_res(sc->vmbus_dev);
+#endif
 
 	sc->vmbus_flags |= VMBUS_FLAG_ATTACHED;
 
@@ -1348,7 +1411,7 @@ cleanup:
 		vmbus_xact_ctx_destroy(sc->vmbus_xc);
 		sc->vmbus_xc = NULL;
 	}
-	free(sc->vmbus_chmap, M_DEVBUF);
+	free(__DEVOLATILE(void *, sc->vmbus_chmap), M_DEVBUF);
 	mtx_destroy(&sc->vmbus_prichan_lock);
 	mtx_destroy(&sc->vmbus_chan_lock);
 
@@ -1359,6 +1422,21 @@ static void
 vmbus_event_proc_dummy(struct vmbus_softc *sc __unused, int cpu __unused)
 {
 }
+
+#ifdef EARLY_AP_STARTUP
+
+static void
+vmbus_intrhook(void *xsc)
+{
+	struct vmbus_softc *sc = xsc;
+
+	if (bootverbose)
+		device_printf(sc->vmbus_dev, "intrhook\n");
+	vmbus_doattach(sc);
+	config_intrhook_disestablish(&sc->vmbus_intrhook);
+}
+
+#endif	/* EARLY_AP_STARTUP */
 
 static int
 vmbus_attach(device_t dev)
@@ -1374,7 +1452,14 @@ vmbus_attach(device_t dev)
 	 */
 	vmbus_sc->vmbus_event_proc = vmbus_event_proc_dummy;
 
-#ifndef EARLY_AP_STARTUP
+#ifdef EARLY_AP_STARTUP
+	/*
+	 * Defer the real attach until the pause(9) works as expected.
+	 */
+	vmbus_sc->vmbus_intrhook.ich_func = vmbus_intrhook;
+	vmbus_sc->vmbus_intrhook.ich_arg = vmbus_sc;
+	config_intrhook_establish(&vmbus_sc->vmbus_intrhook);
+#else	/* !EARLY_AP_STARTUP */
 	/* 
 	 * If the system has already booted and thread
 	 * scheduling is possible indicated by the global
@@ -1382,8 +1467,8 @@ vmbus_attach(device_t dev)
 	 * initialization directly.
 	 */
 	if (!cold)
-#endif
 		vmbus_doattach(vmbus_sc);
+#endif	/* EARLY_AP_STARTUP */
 
 	return (0);
 }
@@ -1413,11 +1498,13 @@ vmbus_detach(device_t dev)
 		sc->vmbus_xc = NULL;
 	}
 
-	free(sc->vmbus_chmap, M_DEVBUF);
+	free(__DEVOLATILE(void *, sc->vmbus_chmap), M_DEVBUF);
 	mtx_destroy(&sc->vmbus_prichan_lock);
 	mtx_destroy(&sc->vmbus_chan_lock);
 
+#ifdef NEW_PCIB
 	vmbus_free_mmio_res(dev);
+#endif
 
 	return (0);
 }

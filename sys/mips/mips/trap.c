@@ -17,7 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -278,11 +278,6 @@ char *trap_type[] = {
 struct trapdebug trapdebug[TRAPSIZE], *trp = trapdebug;
 #endif
 
-#if defined(DDB) || defined(DEBUG)
-void stacktrace(struct trapframe *);
-void logstacktrace(struct trapframe *);
-#endif
-
 #define	KERNLAND(x)	((vm_offset_t)(x) >= VM_MIN_KERNEL_ADDRESS && (vm_offset_t)(x) < VM_MAX_KERNEL_ADDRESS)
 #define	DELAYBRANCH(x)	((int)(x) < 0)
 
@@ -339,12 +334,16 @@ static int emulate_unaligned_access(struct trapframe *frame, int mode);
 extern void fswintrberr(void); /* XXX */
 
 int
-cpu_fetch_syscall_args(struct thread *td, struct syscall_args *sa)
+cpu_fetch_syscall_args(struct thread *td)
 {
-	struct trapframe *locr0 = td->td_frame;
+	struct trapframe *locr0;
 	struct sysentvec *se;
+	struct syscall_args *sa;
 	int error, nsaved;
 
+	locr0 = td->td_frame;
+	sa = &td->td_sa;
+	
 	bzero(sa->args, sizeof(sa->args));
 
 	/* compute next PC after syscall instruction */
@@ -790,19 +789,18 @@ dofault:
 
 	case T_SYSCALL + T_USER:
 		{
-			struct syscall_args sa;
 			int error;
 
-			sa.trapframe = trapframe;
-			error = syscallenter(td, &sa);
+			td->td_sa.trapframe = trapframe;
+			error = syscallenter(td);
 
 #if !defined(SMP) && (defined(DDB) || defined(DEBUG))
 			if (trp == trapdebug)
-				trapdebug[TRAPSIZE - 1].code = sa.code;
+				trapdebug[TRAPSIZE - 1].code = td->td_sa.code;
 			else
-				trp[-1].code = sa.code;
+				trp[-1].code = td->td_sa.code;
 #endif
-			trapdebug_enter(td->td_frame, -sa.code);
+			trapdebug_enter(td->td_frame, -td->td_sa.code);
 
 			/*
 			 * The sync'ing of I & D caches for SYS_ptrace() is
@@ -810,7 +808,7 @@ dofault:
 			 * instead of being done here under a special check
 			 * for SYS_ptrace().
 			 */
-			syscallret(td, error, &sa);
+			syscallret(td, error);
 			return (trapframe->pc);
 		}
 
@@ -1082,7 +1080,6 @@ dofault:
 err:
 
 #if !defined(SMP) && defined(DEBUG)
-		stacktrace(!usermode ? trapframe : td->td_frame);
 		trapDump("trap");
 #endif
 #ifdef SMP
@@ -1302,18 +1299,6 @@ MipsEmulateBranch(struct trapframe *framePtr, uintptr_t instPC, int fpcCSR,
 	return (retAddr);
 }
 
-
-#if defined(DDB) || defined(DEBUG)
-/*
- * Print a stack backtrace.
- */
-void
-stacktrace(struct trapframe *regs)
-{
-	stacktrace_subr(regs->pc, regs->sp, regs->ra, printf);
-}
-#endif
-
 static void
 log_frame_dump(struct trapframe *frame)
 {
@@ -1352,13 +1337,8 @@ log_frame_dump(struct trapframe *frame)
 	log(LOG_ERR, "\tsr: %#jx\tmullo: %#jx\tmulhi: %#jx\tbadvaddr: %#jx\n",
 	    (intmax_t)frame->sr, (intmax_t)frame->mullo, (intmax_t)frame->mulhi, (intmax_t)frame->badvaddr);
 
-#ifdef IC_REG
-	log(LOG_ERR, "\tcause: %#jx\tpc: %#jx\tic: %#jx\n",
-	    (intmax_t)frame->cause, (intmax_t)frame->pc, (intmax_t)frame->ic);
-#else
 	log(LOG_ERR, "\tcause: %#jx\tpc: %#jx\n",
 	    (intmax_t)frame->cause, (intmax_t)frame->pc);
-#endif
 }
 
 #ifdef TRAP_DEBUG
@@ -1399,13 +1379,8 @@ trap_frame_dump(struct trapframe *frame)
 	printf("\tsr: %#jx\tmullo: %#jx\tmulhi: %#jx\tbadvaddr: %#jx\n",
 	    (intmax_t)frame->sr, (intmax_t)frame->mullo, (intmax_t)frame->mulhi, (intmax_t)frame->badvaddr);
 
-#ifdef IC_REG
-	printf("\tcause: %#jx\tpc: %#jx\tic: %#jx\n",
-	    (intmax_t)frame->cause, (intmax_t)frame->pc, (intmax_t)frame->ic);
-#else
 	printf("\tcause: %#jx\tpc: %#jx\n",
 	    (intmax_t)frame->cause, (intmax_t)frame->pc);
-#endif
 }
 
 #endif

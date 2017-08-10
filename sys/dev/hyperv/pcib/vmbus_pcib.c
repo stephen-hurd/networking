@@ -27,6 +27,8 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
+#ifdef NEW_PCIB
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/types.h>
@@ -572,6 +574,8 @@ new_pcichild_device(struct hv_pcibus *hbus, struct pci_func_desc *desc)
 	hpdev->desc = *desc;
 
 	mtx_lock(&hbus->device_list_lock);
+	if (TAILQ_EMPTY(&hbus->children))
+		hbus->pci_domain = desc->ser & 0xFFFF;
 	TAILQ_INSERT_TAIL(&hbus->children, hpdev, link);
 	mtx_unlock(&hbus->device_list_lock);
 	return (hpdev);
@@ -1778,6 +1782,7 @@ static device_method_t vmbus_pcib_methods[] = {
 	DEVMETHOD(pcib_alloc_msix,		vmbus_pcib_alloc_msix),
 	DEVMETHOD(pcib_release_msix,		vmbus_pcib_release_msix),
 	DEVMETHOD(pcib_map_msi,			vmbus_pcib_map_msi),
+	DEVMETHOD(pcib_request_feature,		pcib_request_feature_allow),
 
 	DEVMETHOD_END
 };
@@ -1789,3 +1794,5 @@ DEFINE_CLASS_0(pcib, vmbus_pcib_driver, vmbus_pcib_methods,
 DRIVER_MODULE(vmbus_pcib, vmbus, vmbus_pcib_driver, pcib_devclass, 0, 0);
 MODULE_DEPEND(vmbus_pcib, vmbus, 1, 1, 1);
 MODULE_DEPEND(vmbus_pcib, pci, 1, 1, 1);
+
+#endif /* NEW_PCIB */
