@@ -704,7 +704,14 @@ iflib_debug_reset(void)
 static void iflib_debug_reset(void) {}
 #endif
 
+typedef void async_gtask_fn_t(if_ctx_t ctx, void *arg);
 
+struct async_task_arg {
+	async_gtask_fn_t *ata_fn;
+	if_ctx_t ata_ctx;
+	void *ata_arg;
+	struct grouptask *ata_gtask;
+};
 
 #define IFLIB_DEBUG 0
 
@@ -727,6 +734,7 @@ static void _iflib_pre_assert(if_softc_ctx_t scctx);
 static void iflib_stop(if_ctx_t ctx);
 static void iflib_if_init_locked(if_ctx_t ctx);
 static int async_if_ioctl(if_ctx_t ctx, u_long command, caddr_t data);
+static int iflib_config_async_gtask_dispatch(if_ctx_t ctx, async_gtask_fn_t *fn, char *name, void *arg);
 
 
 #ifndef __NO_STRICT_ALIGNMENT
@@ -1111,13 +1119,12 @@ iflib_netmap_intr(struct netmap_adapter *na, int onoff)
 	struct ifnet *ifp = na->ifp;
 	if_ctx_t ctx = ifp->if_softc;
 
-	CTX_LOCK(ctx);
+	/* XXX - do we need synchronization here?*/
 	if (onoff) {
 		IFDI_INTR_ENABLE(ctx);
 	} else {
 		IFDI_INTR_DISABLE(ctx);
 	}
-	CTX_UNLOCK(ctx);
 }
 
 
@@ -2120,6 +2127,25 @@ iflib_rx_sds_free(iflib_rxq_t rxq)
 	}
 }
 
+/* CONFIG context only */
+static void
+iflib_handle_hang(if_ctx_t ctx, void  *arg)
+{
+	iflib_txq_t txq = arg;
+
+	CTX_LOCK(ctx);
+	if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
+	device_printf(ctx->ifc_dev,  "TX(%d) desc avail = %d, pidx = %d\n",
+				  txq->ift_id, TXQ_AVAIL(txq), txq->ift_pidx);
+
+	IFDI_WATCHDOG_RESET(ctx);
+	ctx->ifc_watchdog_events++;
+
+	ctx->ifc_flags |= IFC_DO_RESET;
+	iflib_admin_intr_deferred(ctx);
+	CTX_UNLOCK(ctx);
+}
+
 /*
  * MI independent logic
  *
@@ -2157,17 +2183,7 @@ iflib_timer(void *arg)
 		    txq, txq->ift_timer.c_cpu);
 	return;
 hung:
-	CTX_LOCK(ctx);
-	if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
-	device_printf(ctx->ifc_dev,  "TX(%d) desc avail = %d, pidx = %d\n",
-				  txq->ift_id, TXQ_AVAIL(txq), txq->ift_pidx);
-
-	IFDI_WATCHDOG_RESET(ctx);
-	ctx->ifc_watchdog_events++;
-
-	ctx->ifc_flags |= IFC_DO_RESET;
-	iflib_admin_intr_deferred(ctx);
-	CTX_UNLOCK(ctx);
+	iflib_config_async_gtask_dispatch(ctx, iflib_handle_hang, "hang handler", txq);
 }
 
 static void
@@ -2237,6 +2253,7 @@ iflib_init_locked(if_ctx_t ctx)
 			txq, txq->ift_timer.c_cpu);
 }
 
+/* CONFIG context only */
 static int
 iflib_media_change(if_t ifp)
 {
@@ -2250,6 +2267,7 @@ iflib_media_change(if_t ifp)
 	return (err);
 }
 
+/* CONFIG context only */
 static void
 iflib_media_status(if_t ifp, struct ifmediareq *ifmr)
 {
@@ -2261,6 +2279,7 @@ iflib_media_status(if_t ifp, struct ifmediareq *ifmr)
 	CTX_UNLOCK(ctx);
 }
 
+/* CONFIG context only */
 static void
 iflib_stop(if_ctx_t ctx)
 {
@@ -2275,9 +2294,7 @@ iflib_stop(if_ctx_t ctx)
 	if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
 
 	IFDI_INTR_DISABLE(ctx);
-	DELAY(1000);
 	IFDI_STOP(ctx);
-	DELAY(1000);
 
 	iflib_debug_reset();
 	/* Wait for current tx queue users to exit to disarm watchdog timer. */
@@ -2620,10 +2637,7 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 		return true;
 	return (iflib_rxd_avail(ctx, rxq, *cidxp, 1));
 err:
-	CTX_LOCK(ctx);
-	ctx->ifc_flags |= IFC_DO_RESET;
-	iflib_admin_intr_deferred(ctx);
-	CTX_UNLOCK(ctx);
+	iflib_admin_reset_deferred(ctx);
 	return (false);
 }
 
@@ -3581,6 +3595,7 @@ _task_fn_rx(void *context)
 		GROUPTASK_ENQUEUE(&rxq->ifr_task);
 }
 
+/* CONFIG context only */
 static void
 _task_fn_admin(void *context)
 {
@@ -3617,6 +3632,7 @@ _task_fn_admin(void *context)
 }
 
 
+/* CONFIG context only */
 static void
 _task_fn_iov(void *context)
 {
@@ -3746,6 +3762,7 @@ iflib_if_transmit(if_t ifp, struct mbuf *m)
 	return (err);
 }
 
+/* CONFIG context only */
 static void
 iflib_if_qflush(if_t ifp)
 {
@@ -3928,6 +3945,7 @@ iflib_if_get_counter(if_t ifp, ift_counter cnt)
  *
  **********************************************************************/
 
+/* CONFIG context only */
 static void
 iflib_vlan_register(void *arg, if_t ifp, uint16_t vtag)
 {
@@ -3947,6 +3965,7 @@ iflib_vlan_register(void *arg, if_t ifp, uint16_t vtag)
 	CTX_UNLOCK(ctx);
 }
 
+/* CONFIG context only */
 static void
 iflib_vlan_unregister(void *arg, if_t ifp, uint16_t vtag)
 {
@@ -3966,6 +3985,7 @@ iflib_vlan_unregister(void *arg, if_t ifp, uint16_t vtag)
 	CTX_UNLOCK(ctx);
 }
 
+/* CONFIG context only */
 static void
 iflib_led_func(void *arg, int onoff)
 {
@@ -5126,13 +5146,20 @@ iflib_admin_intr_deferred(if_ctx_t ctx)
 	GROUPTASK_ENQUEUE(&ctx->ifc_admin_task);
 }
 
-void
-iflib_admin_reset_deferred(if_ctx_t ctx)
+/* CONFIG context only */
+static void
+iflib_handle_reset(if_ctx_t ctx, void *arg)
 {
 	CTX_LOCK(ctx);
 	ctx->ifc_flags |= IFC_DO_RESET;
 	iflib_admin_intr_deferred(ctx);
 	CTX_UNLOCK(ctx);
+}
+
+void
+iflib_admin_reset_deferred(if_ctx_t ctx)
+{
+	iflib_config_async_gtask_dispatch(ctx, iflib_handle_reset, "reset handler", NULL);
 }
 
 void
@@ -5194,15 +5221,6 @@ iflib_flags_set(if_ctx_t ctx, void *arg)
 	if (err)
 		log(LOG_WARNING, "IFDI_PROMISC_SET returned %d\n", err);
 }
-
-typedef void async_gtask_fn_t(if_ctx_t ctx, void *arg);
-
-struct async_task_arg {
-	async_gtask_fn_t *ata_fn;
-	if_ctx_t ata_ctx;
-	void *ata_arg;
-	struct grouptask *ata_gtask;
-};
 
 static void
 async_gtask(void *ctx)
