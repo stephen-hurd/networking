@@ -717,7 +717,7 @@ em_if_attach_pre(if_ctx_t ctx)
 		return (ENXIO);
 	}
 
-	adapter->ctx = ctx;
+	adapter->ctx = adapter->osdep.ctx = ctx;
 	adapter->dev = adapter->osdep.dev = dev;
 	scctx = adapter->shared = iflib_get_softc_ctx(ctx);
 	adapter->media = iflib_get_media(ctx);

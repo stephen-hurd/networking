@@ -39,6 +39,7 @@
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
 #include <sys/mbuf.h>
@@ -47,6 +48,14 @@
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/bus.h>
+
+#include <net/ethernet.h>
+#include <net/if.h>
+#include <net/if_var.h>
+#include <net/iflib.h>
+
+
+
 #include <machine/bus.h>
 #include <sys/rman.h>
 #include <machine/resource.h>
@@ -58,11 +67,41 @@
 
 
 #define ASSERT(x) if(!(x)) panic("EM: x")
+#define us_scale(x)  max(1, (x/(1000000/hz)))
+static inline int
+ms_scale(int x) {
+	if (hz == 1000) {
+		return (x);
+	} else if (hz > 1000) {
+		return (x*(hz/1000));
+	} else {
+		return (max(1, x/(1000/hz)));
+	}
+}
+extern int cold;
 
-#define usec_delay(x) DELAY(x)
+static inline void
+safe_pause_us(int x) {
+	if (cold) {
+		DELAY(x);
+	} else {
+		pause("e1000_delay", max(1,  x/(1000000/hz)));
+	}
+}
+
+static inline void
+safe_pause_ms(int x) {
+	if (cold) {
+		DELAY(x*1000);
+	} else {
+		pause("e1000_delay", ms_scale(x));
+	}
+}
+
+#define usec_delay(x) safe_pause_us(x)
 #define usec_delay_irq(x) usec_delay(x)
-#define msec_delay(x) DELAY(1000*(x))
-#define msec_delay_irq(x) DELAY(1000*(x))
+#define msec_delay(x) safe_pause_ms(x)
+#define msec_delay_irq(x) msec_delay(x)
 
 /* Enable/disable debugging statements in shared code */
 #define DBG		0
@@ -135,6 +174,7 @@ struct e1000_osdep
 	bus_space_tag_t    flash_bus_space_tag;
 	bus_space_handle_t flash_bus_space_handle;
 	device_t	   dev;
+	if_ctx_t	   ctx;
 };
 
 #define E1000_REGISTER(hw, reg) (((hw)->mac.type >= e1000_82543) \
