@@ -4103,7 +4103,6 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 	err = IFDI_ATTACH_PRE(ctx);
 	CTX_UNLOCK(ctx);
 	if (err) {
-		CTX_UNLOCK(ctx);
 		device_printf(dev, "IFDI_ATTACH_PRE failed %d\n", err);
 		return (err);
 	}
@@ -4241,7 +4240,10 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 		}
 	}
 	ether_ifattach(ctx->ifc_ifp, ctx->ifc_mac);
-	if ((err = IFDI_ATTACH_POST(ctx)) != 0) {
+	CTX_LOCK(ctx);
+	err = IFDI_ATTACH_POST(ctx);
+	CTX_UNLOCK(ctx);
+	if (err) {
 		device_printf(dev, "IFDI_ATTACH_POST failed %d\n", err);
 		goto fail_detach;
 	}
