@@ -2219,6 +2219,27 @@ s32 e1000_get_hw_semaphore(struct e1000_hw *hw)
 	}
 
 	if (i == timeout) {
+#ifdef notyet
+		/*
+		 * XXX This sounds more like a driver bug whereby we either
+		 * recursed accidentally or missed clearing it previously
+		 */
+		/* In rare circumstances, the SW semaphore may already be held
+		 * unintentionally. Clear the semaphore once before giving up.
+		 */
+               if (hw->dev_spec._82575.clear_semaphore_once) {
+                       hw->dev_spec._82575.clear_semaphore_once = FALSE;
+                       e1000_put_hw_semaphore_generic(hw);
+                       for (i = 0; i < timeout; i++) {
+                               swsm = E1000_READ_REG(hw, E1000_SWSM);
+                               if (!(swsm & E1000_SWSM_SMBI))
+                                       break;
+
+                               usec_delay(50);
+                       }
+               }
+#endif
+
 		DEBUGOUT("Driver can't access device - SMBI bit is set.\n");
 		return -E1000_ERR_NVM;
 	}
