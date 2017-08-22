@@ -526,14 +526,6 @@ rxd_info_zero(if_rxd_info_t ri)
 
 #define CTX_ACTIVE(ctx) ((if_getdrvflags((ctx)->ifc_ifp) & IFF_DRV_RUNNING))
 
-/*
-#define CTX_LOCK_INIT(_sc, _name)  mtx_init(&(_sc)->ifc_mtx, _name, "iflib ctx lock", MTX_DEF)
-
-#define CTX_LOCK(ctx) mtx_lock(&(ctx)->ifc_mtx)
-#define CTX_UNLOCK(ctx) mtx_unlock(&(ctx)->ifc_mtx)
-#define CTX_LOCK_DESTROY(ctx) mtx_destroy(&(ctx)->ifc_mtx)
-*/
-
 #define CTX_LOCK_INIT(_sc, _name)  sx_init(&(_sc)->ifc_sx, _name)
 
 #define CTX_LOCK(ctx) sx_xlock(&(ctx)->ifc_sx)
@@ -4107,8 +4099,11 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 			scctx->isc_ntxd[i] = sctx->isc_ntxd_max[i];
 		}
 	}
-
-	if ((err = IFDI_ATTACH_PRE(ctx)) != 0) {
+	CTX_LOCK(ctx);
+	err = IFDI_ATTACH_PRE(ctx);
+	CTX_UNLOCK(ctx);
+	if (err) {
+		CTX_UNLOCK(ctx);
 		device_printf(dev, "IFDI_ATTACH_PRE failed %d\n", err);
 		return (err);
 	}
