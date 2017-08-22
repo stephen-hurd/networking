@@ -3591,9 +3591,9 @@ _task_fn_admin(void *context)
 		ctx->ifc_flags &= ~IFC_DO_RESET;
 		iflib_if_init_locked(ctx);
 	}
+	IFDI_UPDATE_ADMIN_STATUS(ctx);
 	CTX_UNLOCK(ctx);
 
-	IFDI_UPDATE_ADMIN_STATUS(ctx);
 	if (LINK_ACTIVE(ctx) == 0 || !running)
 		return;
 	for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_ntxqsets; i++, txq++)
