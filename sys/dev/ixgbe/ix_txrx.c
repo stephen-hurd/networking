@@ -1,31 +1,31 @@
 /******************************************************************************
 
-  Copyright (c) 2001-2015, Intel Corporation 
+  Copyright (c) 2001-2017, Intel Corporation
   All rights reserved.
-  
-  Redistribution and use in source and binary forms, with or without 
+
+  Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions are met:
-  
-   1. Redistributions of source code must retain the above copyright notice, 
+
+   1. Redistributions of source code must retain the above copyright notice,
       this list of conditions and the following disclaimer.
-  
-   2. Redistributions in binary form must reproduce the above copyright 
-      notice, this list of conditions and the following disclaimer in the 
+
+   2. Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
       documentation and/or other materials provided with the distribution.
-  
-   3. Neither the name of the Intel Corporation nor the names of its 
-      contributors may be used to endorse or promote products derived from 
+
+   3. Neither the name of the Intel Corporation nor the names of its
+      contributors may be used to endorse or promote products derived from
       this software without specific prior written permission.
-  
+
   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
-  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
-  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE 
-  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
-  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
-  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
-  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
-  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
+  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
   POSSIBILITY OF SUCH DAMAGE.
 
@@ -51,8 +51,34 @@
 #define CSUM_UDP (CSUM_IP_UDP | CSUM_IP6_UDP)
 #undef CSUM_SCTP
 #define CSUM_SCTP (CSUM_IP_SCTP | CSUM_IP6_SCTP)
+#ifdef notyet
+/*
+ * HW RSC control:
+ *  this feature only works with
+ *  IPv4, and only on 82599 and later.
+ *  Also this will cause IP forwarding to
+ *  fail and that can't be controlled by
+ *  the stack as LRO can. For all these
+ *  reasons I've deemed it best to leave
+ *  this off and not bother with a tuneable
+ *  interface, this would need to be compiled
+ *  to enable.
+ */
+static bool ixgbe_rsc_enable = FALSE;
 
-/*********************************************************************
+/*
+ * For Flow Director: this is the
+ * number of TX packets we sample
+ * for the filter pool, this means
+ * every 20th packet will be probed.
+ *
+ * This feature can be disabled by
+ * setting this to 0.
+ */
+static int atr_sample_rate = 20;
+#endif
+
+/************************************************************************
  *  Local Function prototypes
  *********************************************************************/
 static int ixgbe_isc_txd_encap(void *arg, if_pkt_info_t pi);
@@ -151,6 +177,7 @@ ixgbe_tx_ctx_setup(struct ixgbe_adv_tx_context_desc *TXD, if_pkt_info_t pi)
 	if (offload)
 		olinfo_status |= IXGBE_TXD_POPTS_TXSM << 8;
 
+
 	type_tucmd_mlhl |= IXGBE_ADVTXD_DCMD_DEXT | IXGBE_ADVTXD_DTYP_CTXT;
 
 	/* Now copy bits into descriptor */
@@ -198,6 +225,7 @@ ixgbe_isc_txd_encap(void *arg, if_pkt_info_t pi)
 			++txr->tso_tx;
 		}
 
+
 		if (++i == ntxd)
 			i = 0;
 	} else {
@@ -215,12 +243,14 @@ ixgbe_isc_txd_encap(void *arg, if_pkt_info_t pi)
 		segaddr = htole64(segs[j].ds_addr);
 
 		txd->read.buffer_addr = segaddr;
+
 		txd->read.cmd_type_len = htole32(cmd | seglen);
 		txd->read.olinfo_status = htole32(olinfo_status);
 
 		pidx_last = i;
 		if (++i == ntxd) {
 			i = 0;
+
 		}
 	}
 	if (txd_flags) {
@@ -228,6 +258,7 @@ ixgbe_isc_txd_encap(void *arg, if_pkt_info_t pi)
 		txr->tx_rs_pidx = (txr->tx_rs_pidx+1) & (ntxd-1);
 		MPASS(txr->tx_rs_pidx != txr->tx_rs_cidx);
 	}
+
 
 	txd->read.cmd_type_len |=
 		htole32(IXGBE_TXD_CMD_EOP | txd_flags);
@@ -240,11 +271,13 @@ ixgbe_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	++txr->total_packets;
   
 	return (0);
+
 }
   
 static void
 ixgbe_isc_txd_flush(void *arg, uint16_t txqid, qidx_t pidx)
 {
+
 	struct adapter *sc       = arg;
 	struct ix_tx_queue *que     = &sc->tx_queues[txqid];
 	struct tx_ring *txr      = &que->txr;
@@ -255,6 +288,7 @@ ixgbe_isc_txd_flush(void *arg, uint16_t txqid, qidx_t pidx)
 static int
 ixgbe_isc_txd_credits_update(void *arg, uint16_t txqid, bool clear)
 {
+
 	struct adapter   *sc = arg;
 	if_softc_ctx_t scctx = sc->shared;
 	struct ix_tx_queue  *que = &sc->tx_queues[txqid];
@@ -265,6 +299,7 @@ ixgbe_isc_txd_credits_update(void *arg, uint16_t txqid, bool clear)
 	qidx_t cur, prev, ntxd, rs_cidx;
 	int32_t delta;
 	uint8_t status;
+
 
 	rs_cidx = txr->tx_rs_cidx;
 	if (rs_cidx == txr->tx_rs_pidx)
@@ -317,9 +352,35 @@ ixgbe_isc_rxd_refill(void *arg, if_rxd_update_t iru)
 	}
 }
 
+#ifdef notyet
+/************************************************************************
+ * ixgbe_rsc_count
+ *
+ *   Used to detect a descriptor that has been merged by Hardware RSC.
+ ************************************************************************/
+static inline u32
+ixgbe_rsc_count(union ixgbe_adv_rx_desc *rx)
+{
+	return (le32toh(rx->wb.lower.lo_dword.data) &
+	    IXGBE_RXDADV_RSCCNT_MASK) >> IXGBE_RXDADV_RSCCNT_SHIFT;
+} /* ixgbe_rsc_count */
+#endif
+
+/************************************************************************
+ * ixgbe_setup_hw_rsc
+ *
+ *   Initialize Hardware RSC (LRO) feature on 82599
+ *   for an RX ring, this is toggled by the LRO capability
+ *   even though it is transparent to the stack.
+ *
+ *   NOTE: Since this HW feature only works with IPv4 and
+ *         testing has shown soft LRO to be as effective,
+ *         this feature will be disabled by default.
+ ************************************************************************/
 static void
 ixgbe_isc_rxd_flush(void *arg, uint16_t rxqid, uint8_t flid __unused, qidx_t pidx)
 {
+
 	struct adapter *sc       = arg;
 	struct ix_rx_queue *que     = &sc->rx_queues[rxqid];
 	struct rx_ring *rxr      = &que->rxr;
@@ -410,7 +471,7 @@ ixgbe_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 		if (eop && (staterr & IXGBE_RXDADV_ERR_FRAME_ERR_MASK) != 0) {
 
 #if __FreeBSD_version >= 1100036
-			if (IXGBE_IS_VF(adapter))
+			if (adapter->feat_en & IXGBE_FEATURE_VF)
 				if_inc_counter(ifp, IFCOUNTER_IERRORS, 1);
 #endif
 
@@ -442,13 +503,15 @@ ixgbe_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 	return (0);
 }
 
-/*********************************************************************
+
+
+/************************************************************************
+ * ixgbe_rx_checksum
  *
- *  Verify that the hardware indicated that the checksum is valid.
- *  Inform the stack about the status of checksum so that stack
- *  doesn't spend time verifying the checksum.
- *
- *********************************************************************/
+ *   Verify that the hardware indicated that the checksum is valid.
+ *   Inform the stack about the status of checksum so that stack
+ *   doesn't spend time verifying the checksum.
+ ************************************************************************/
 static void
 ixgbe_rx_checksum(u32 staterr, if_rxd_info_t ri, u32 ptype)
 {
@@ -477,7 +540,7 @@ ixgbe_rx_checksum(u32 staterr, if_rxd_info_t ri, u32 ptype)
 				ri->iri_csum_data = htons(0xffff);
 		} 
 	}
-}
+} /* ixgbe_rx_checksum */
 
 /********************************************************************
  *

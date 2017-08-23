@@ -6,6 +6,7 @@ KMOD    = if_ix
 SRCS    = device_if.h bus_if.h pci_if.h pci_iov_if.h ifdi_if.h
 SRCS    += opt_inet.h opt_inet6.h opt_rss.h opt_iflib.h
 SRCS    += if_ix.c ix_txrx.c ixgbe_osdep.c ixgbe_sysctl.c
+SRCS    += if_bypass.c if_fdir.c if_sriov.c
 
 # Shared source
 SRCS    += ixgbe_common.c ixgbe_api.c ixgbe_phy.c ixgbe_mbx.c ixgbe_vf.c
