@@ -35,7 +35,6 @@
 
 #ifndef _IFLIB_IXGBE_H_
 #define _IFLIB_IXGBE_H_
-#undef IXGBE_FDIR
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -98,6 +97,7 @@
 #endif
 #include "ixgbe_features.h"
 #include "ixgbe_rss.h"
+#include "ixgbe_fdir.h"
 
 #define IXGBE_CORE_LOCK_ASSERT(a) (sx_assert(iflib_ctx_lock_get((a)->ctx), SX_XLOCKED))
 
@@ -226,10 +226,6 @@
 #define IXGBE_LINK_ITR_QUANTA  0x1FF
 #define IXGBE_LINK_ITR         ((IXGBE_LINK_ITR_QUANTA << 3) & \
                                 IXGBE_EITR_ITR_INT_MASK)
-
-struct adapter;
-void	ixgbe_init_fdir(struct adapter *);
-void  ixgbe_reinit_fdir(void *, int);
 
 /* MAC type macros */
 #define IXGBE_IS_X550VF(_adapter) \

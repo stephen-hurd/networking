@@ -353,17 +353,6 @@ SYSCTL_INT(_hw_ix, OID_AUTO, rxd, CTLFLAG_RDTUN, &ixgbe_rxd, 0,
 static int allow_unsupported_sfp = FALSE;
 TUNABLE_INT("hw.ix.unsupported_sfp", &allow_unsupported_sfp);
 
-#ifdef IXGBE_FDIR
-/* 
-** Flow Director actually 'steals'
-** part of the packet buffer as its
-** filter pool, this variable controls
-** how much it uses:
-**  0 = 64K, 1 = 128K, 2 = 256K
-*/
-static int fdir_pballoc = 1;
-#endif
-
 static MALLOC_DEFINE(M_IXGBE, "ix", "ix driver allocations");
 
 extern struct if_txrx ixgbe_txrx;
@@ -451,12 +440,6 @@ ixgbe_if_tx_queues_alloc(if_ctx_t ctx, caddr_t *vaddrs, uint64_t *paddrs, int nt
 
 		txr->bytes = 0;
 		txr->total_packets = 0;
-
-#ifdef IXGBE_FDIR
-		/* Set the rate at which we sample packets */
-		if (adapter->hw.mac.type != ixgbe_mac_82598EB)
-			txr->atr_sample = atr_sample_rate;
-#endif
 
 	}
 
@@ -2413,11 +2396,12 @@ ixgbe_msix_link(void *arg)
 #ifdef IXGBE_FDIR
 		if (reg_eicr & IXGBE_EICR_FLOW_DIR) {
 			/* This is probably overkill :) */
-			if (!atomic_cmpset_int(&adapter->fdir_reinit, 0, 1))
-				return;
-			/* Disable the interrupt */
-			IXGBE_WRITE_REG(hw, IXGBE_EIMC, IXGBE_EICR_FLOW_DIR);
-			GROUPTASK_ENQUEUE(&adapter->fdir_task);
+			if (atomic_cmpset_int(&adapter->fdir_reinit, 0, 1)) {
+				/* Disable the interrupt */
+				IXGBE_WRITE_REG(hw, IXGBE_EIMC, IXGBE_EICR_FLOW_DIR);
+				GROUPTASK_ENQUEUE(&adapter->fdir_task);
+			}
+			return (FILTER_HANDLED);
 		} else
 #endif
 			if (reg_eicr & IXGBE_EICR_ECC) {

@@ -51,6 +51,7 @@
 #define CSUM_UDP (CSUM_IP_UDP | CSUM_IP6_UDP)
 #undef CSUM_SCTP
 #define CSUM_SCTP (CSUM_IP_SCTP | CSUM_IP6_SCTP)
+
 #ifdef notyet
 /*
  * HW RSC control:
@@ -65,7 +66,9 @@
  *  to enable.
  */
 static bool ixgbe_rsc_enable = FALSE;
+#endif
 
+#ifdef IXGBE_FDIR
 /*
  * For Flow Director: this is the
  * number of TX packets we sample
@@ -214,6 +217,17 @@ ixgbe_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	i = first = pi->ipi_pidx;
 	txd_flags = (pi->ipi_flags & IPI_TX_INTR) ? IXGBE_TXD_CMD_RS : 0;
 	TXD = (struct ixgbe_adv_tx_context_desc *) &txr->tx_base[first];
+#ifdef IXGBE_FDIR
+	if (__predict_true((pi->ipi_csum_flags | pi->ipi_vtag)) &&
+	    (sc->feat_en & IXGBE_FEATURE_FDIR) &&
+	    (txr->atr_sample) && (!sc->fdir_reinit)) {
+		++txr->atr_count;
+		if (txr->atr_count >= atr_sample_rate) {
+			ixgbe_atr(txr, pi);
+			txr->atr_count = 0;
+		}
+	}
+#endif
 	if (pi->ipi_csum_flags & CSUM_OFFLOAD || IXGBE_IS_X550VF(sc) || pi->ipi_vtag) {
 		/*********************************************
 		 * Set up the appropriate offload context

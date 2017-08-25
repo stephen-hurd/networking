@@ -34,7 +34,11 @@
 
 #include "ixgbe.h"
 
+int fdir_pballoc = 1;
 #ifdef IXGBE_FDIR
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
 
 void
 ixgbe_init_fdir(struct adapter *adapter)
@@ -50,7 +54,7 @@ ixgbe_init_fdir(struct adapter *adapter)
 } /* ixgbe_init_fdir */
 
 void
-ixgbe_reinit_fdir(void *context, int pending)
+ixgbe_reinit_fdir(void *context)
 {
 	struct adapter *adapter = context;
 	struct ifnet   *ifp = adapter->ifp;
@@ -77,46 +81,34 @@ ixgbe_reinit_fdir(void *context, int pending)
  *   IXGBE_FDIR_RATE of packets.
  ************************************************************************/
 void
-ixgbe_atr(struct tx_ring *txr, struct mbuf *mp)
+ixgbe_atr(void *_txr, if_pkt_info_t pi)
 {
+	struct tx_ring *txr = _txr;
 	struct adapter             *adapter = txr->adapter;
-	struct ix_queue            *que;
+	struct ix_tx_queue            *que;
 	struct ip                  *ip;
 	struct tcphdr              *th;
 	struct udphdr              *uh;
-	struct ether_vlan_header   *eh;
 	union ixgbe_atr_hash_dword input = {.dword = 0};
 	union ixgbe_atr_hash_dword common = {.dword = 0};
-	int                        ehdrlen, ip_hlen;
-	u16                        etype;
-
-	eh = mtod(mp, struct ether_vlan_header *);
-	if (eh->evl_encap_proto == htons(ETHERTYPE_VLAN)) {
-		ehdrlen = ETHER_HDR_LEN + ETHER_VLAN_ENCAP_LEN;
-		etype = eh->evl_proto;
-	} else {
-		ehdrlen = ETHER_HDR_LEN;
-		etype = eh->evl_encap_proto;
-	}
 
 	/* Only handling IPv4 */
-	if (etype != htons(ETHERTYPE_IP))
+	if ((pi->ipi_flags & IPI_TX_IPV4) != IPI_TX_IPV4)
 		return;
 
-	ip = (struct ip *)(mp->m_data + ehdrlen);
-	ip_hlen = ip->ip_hl << 2;
+	ip = (struct ip *)(pi->ipi_hdr_data + pi->ipi_ehdrlen);
 
 	/* check if we're UDP or TCP */
 	switch (ip->ip_p) {
 	case IPPROTO_TCP:
-		th = (struct tcphdr *)((caddr_t)ip + ip_hlen);
+		th = (struct tcphdr *)((caddr_t)ip + pi->ipi_ip_hlen);
 		/* src and dst are inverted */
 		common.port.dst ^= th->th_sport;
 		common.port.src ^= th->th_dport;
 		input.formatted.flow_type ^= IXGBE_ATR_FLOW_TYPE_TCPV4;
 		break;
 	case IPPROTO_UDP:
-		uh = (struct udphdr *)((caddr_t)ip + ip_hlen);
+		uh = (struct udphdr *)((caddr_t)ip + pi->ipi_ip_hlen);
 		/* src and dst are inverted */
 		common.port.dst ^= uh->uh_sport;
 		common.port.src ^= uh->uh_dport;
@@ -126,14 +118,14 @@ ixgbe_atr(struct tx_ring *txr, struct mbuf *mp)
 		return;
 	}
 
-	input.formatted.vlan_id = htobe16(mp->m_pkthdr.ether_vtag);
-	if (mp->m_pkthdr.ether_vtag)
+	input.formatted.vlan_id = htobe16(pi->ipi_vtag);
+	if (pi->ipi_vtag)
 		common.flex_bytes ^= htons(ETHERTYPE_VLAN);
 	else
-		common.flex_bytes ^= etype;
+		common.flex_bytes ^= pi->ipi_etype;
 	common.ip ^= ip->ip_src.s_addr ^ ip->ip_dst.s_addr;
 
-	que = &adapter->queues[txr->me];
+	que = &adapter->tx_queues[txr->me];
 	/*
 	 * This assumes the Rx queue and Tx
 	 * queue are bound to the same CPU
@@ -146,15 +138,7 @@ ixgbe_atr(struct tx_ring *txr, struct mbuf *mp)
 
 /* TASK_INIT needs this function defined regardless if it's enabled */
 void
-ixgbe_reinit_fdir(void *context, int pending)
-{
-	UNREFERENCED_2PARAMETER(context, pending);
-} /* ixgbe_reinit_fdir */
-#ifdef notyet
+ixgbe_reinit_fdir(void *context __unused) { }
 void
-ixgbe_atr(struct tx_ring *txr, struct mbuf *mp)
-{
-	UNREFERENCED_2PARAMETER(txr, mp);
-} /* ixgbe_atr */
-#endif
+ixgbe_atr(void *_txr __unused, if_pkt_info_t pi __unused) { }
 #endif

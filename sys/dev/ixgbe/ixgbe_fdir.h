@@ -42,8 +42,9 @@
  * as its filter pool, this variable controls how much it uses:
  *  0 = 64K, 1 = 128K, 2 = 256K
  */
-int fdir_pballoc = 1;
 
+extern int fdir_pballoc;
+struct adapter;
 void ixgbe_init_fdir(struct adapter *);
 
 #else
@@ -52,7 +53,7 @@ void ixgbe_init_fdir(struct adapter *);
 
 #endif
 
-void ixgbe_reinit_fdir(void *, int);
-void ixgbe_atr(struct tx_ring *, struct mbuf *);
+void ixgbe_reinit_fdir(void *);
+void ixgbe_atr(void *, if_pkt_info_t);
 
 #endif /* _IXGBE_FDIR_H_ */
