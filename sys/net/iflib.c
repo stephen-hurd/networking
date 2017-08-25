@@ -464,11 +464,11 @@ typedef struct if_rxsd {
 
 /* multiple of word size */
 #ifdef __LP64__
-#define PKT_INFO_SIZE	6
+#define PKT_INFO_SIZE	7
 #define RXD_INFO_SIZE	5
 #define PKT_TYPE uint64_t
 #else
-#define PKT_INFO_SIZE	11
+#define PKT_INFO_SIZE	13
 #define RXD_INFO_SIZE	8
 #define PKT_TYPE uint32_t
 #endif
@@ -494,9 +494,10 @@ pkt_info_zero(if_pkt_info_t pi)
 	pi_pad = (if_pkt_info_pad_t)pi;
 	pi_pad->pkt_val[0] = 0; pi_pad->pkt_val[1] = 0; pi_pad->pkt_val[2] = 0;
 	pi_pad->pkt_val[3] = 0; pi_pad->pkt_val[4] = 0; pi_pad->pkt_val[5] = 0;
+	pi_pad->pkt_val[6] = 0;
 #ifndef __LP64__
-	pi_pad->pkt_val[6] = 0; pi_pad->pkt_val[7] = 0; pi_pad->pkt_val[8] = 0;
-	pi_pad->pkt_val[9] = 0; pi_pad->pkt_val[10] = 0;
+	pi_pad->pkt_val[7] = 0; pi_pad->pkt_val[8] = 0; pi_pad->pkt_val[9] = 0;
+	pi_pad->pkt_val[10] = 0; pi_pad->pkt_val[11] = 0;
 #endif	
 }
 
@@ -3148,6 +3149,7 @@ iflib_encap(iflib_txq_t txq, struct mbuf **m_headp)
 		if (__predict_false((err = iflib_parse_header(txq, &pi, m_headp)) != 0))
 			return (err);
 		m_head = *m_headp;
+		pi.ipi_hdr_data = mtod(m_head, caddr_t);
 	}
 
 retry:
