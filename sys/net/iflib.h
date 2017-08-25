@@ -119,6 +119,7 @@ typedef struct if_pkt_info {
 	qidx_t			ipi_pidx;	/* start pidx for encap */
 	qidx_t			ipi_new_pidx;	/* next available pidx post-encap */
 	/* offload handling */
+	caddr_t			ipi_hdr_data;	/* raw header */
 	uint8_t			ipi_ehdrlen;	/* ether header length */
 	uint8_t			ipi_ip_hlen;	/* ip header length */
 	uint8_t			ipi_tcp_hlen;	/* tcp header length */
