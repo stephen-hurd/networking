@@ -58,8 +58,7 @@ int		taskqgroup_attach_cpu(struct taskqgroup *qgroup, struct grouptask *grptask,
 void	taskqgroup_detach(struct taskqgroup *qgroup, struct grouptask *gtask);
 struct taskqgroup *taskqgroup_create(char *name);
 void	taskqgroup_destroy(struct taskqgroup *qgroup);
-int	taskqgroup_adjust(struct taskqgroup *qgroup, int cnt, int stride);
-void taskqgroup_set_ithread(struct taskqgroup *qgroup, int pri);
+int	taskqgroup_adjust(struct taskqgroup *qgroup, int cnt, int stride, bool ithread, int pri);
 
 #define TASK_ENQUEUED			0x1
 #define TASK_SKIP_WAKEUP		0x2
@@ -81,7 +80,8 @@ void taskqgroup_set_ithread(struct taskqgroup *qgroup, int pri);
 #define TASKQGROUP_DECLARE(name)			\
 extern struct taskqgroup *qgroup_##name
 
-#define TASKQGROUP_DEFINE(name, cnt, stride)				\
+
+#define TASKQGROUP_DEFINE(name, cnt, stride, intr, pri)			\
 									\
 struct taskqgroup *qgroup_##name;					\
 									\
@@ -97,11 +97,16 @@ SYSINIT(taskqgroup_##name, SI_SUB_TASKQ, SI_ORDER_FIRST,		\
 static void								\
 taskqgroup_adjust_##name(void *arg)					\
 {									\
-	taskqgroup_adjust(qgroup_##name, (cnt), (stride));		\
+	taskqgroup_adjust(qgroup_##name, (cnt), (stride), (intr), (pri)); \
 }									\
 									\
 SYSINIT(taskqgroup_adj_##name, SI_SUB_SMP, SI_ORDER_ANY,		\
 	taskqgroup_adjust_##name, NULL)
+
+
+
+
+
 
 TASKQGROUP_DECLARE(net);
 TASKQGROUP_DECLARE(softirq);
