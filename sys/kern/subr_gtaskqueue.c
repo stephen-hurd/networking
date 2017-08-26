@@ -970,7 +970,7 @@ taskqgroup_create(char *name)
 }
 
 void
-taskqgroup_set_ithread(struct taskqgroup *qgroup)
+taskqgroup_set_ithread(struct taskqgroup *qgroup, int pri)
 {
 	int i, j;
 	struct gtaskqueue *gtq;
@@ -988,7 +988,7 @@ taskqgroup_set_ithread(struct taskqgroup *qgroup)
 			sched_class(td, PRI_ITHD);
 #endif
 			td->td_pflags |= TDP_ITHREAD;
-			sched_prio(td, PI_NET);
+			sched_prio(td, pri);
 			thread_unlock(td);
 		}
 	}
