@@ -66,9 +66,40 @@ enum {
 	IXGBE_ERROR_CAUTION,
 };
 
-/* The happy-fun DELAY macro is defined in /usr/src/sys/i386/include/clock.h */
-#define usec_delay(x) DELAY(x)
-#define msec_delay(x) DELAY(1000*(x))
+#define us_scale(x)  max(1, (x/(1000000/hz)))
+static inline int
+ms_scale(int x) {
+	if (hz == 1000) {
+		return (x);
+	} else if (hz > 1000) {
+		return (x*(hz/1000));
+	} else {
+		return (max(1, x/(1000/hz)));
+	}
+}
+
+extern int cold;
+
+static inline void
+safe_pause_us(int x) {
+	if (cold) {
+		DELAY(x);
+	} else {
+		pause("e1000_delay", max(1,  x/(1000000/hz)));
+	}
+}
+
+static inline void
+safe_pause_ms(int x) {
+	if (cold) {
+		DELAY(x*1000);
+	} else {
+		pause("e1000_delay", ms_scale(x));
+	}
+}
+
+#define usec_delay(x) safe_pause_us(x)
+#define msec_delay(x) safe_pause_ms(x)
 
 #define DBG 0
 #define MSGOUT(S, A, B)     printf(S "\n", A, B)

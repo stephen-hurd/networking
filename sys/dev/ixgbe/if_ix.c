@@ -3456,70 +3456,15 @@ static void
 ixgbe_if_timer(if_ctx_t ctx, uint16_t qid)
 {
 	struct adapter		*adapter = iflib_get_softc(ctx);
-	struct ix_tx_queue	        *que = &adapter->tx_queues[qid];
-	u64		        queues = 0;
-	device_t dev;
-	int hung;
 
 	if (qid != 0)
 		return;
 
-	hung = 0;
 	/* Check for pluggable optics */
 	if (adapter->sfp_probe && !ixgbe_sfp_probe(ctx))
 			return; /* Nothing to do */
-
-	dev = iflib_get_dev(ctx);
-	ixgbe_check_link(&adapter->hw,
-					 &adapter->link_speed, &adapter->link_up, 0);
-	ixgbe_if_update_admin_status(ctx);
-	ixgbe_update_stats_counters(adapter);
-		/*
-	 * Check the TX queues status
-	 *      - mark hung queues so we don't schedule on them
-	 *      - watchdog only if all queues show hung
-	 */
-	for (int i = 0; i < adapter->num_tx_queues; i++, que++) {
-		/* Keep track of queues with work for soft irq */
-		if (que->txr.busy)
-			queues |= ((u64)1 << que->txr.me);
-		/*
-		 * Each time txeof runs without cleaning, but there
-		 * are uncleaned descriptors it increments busy. If
-		 * we get to the MAX we declare it hung.
-		 */
-		if (que->txr.busy == IXGBE_QUEUE_HUNG) {
-			++hung;
-			/* Mark the queue as inactive */
-			adapter->active_queues &= ~((u64)1 << que->txr.me);
-			continue;
-		} else {
-			/* Check if we've come back from hung */
-			if ((adapter->active_queues & ((u64)1 << que->txr.me)) == 0)
-				adapter->active_queues |= ((u64)1 << que->txr.me);
-		}
-		if (que->txr.busy >= IXGBE_MAX_TX_BUSY) {
-			device_printf(dev,
-			    "Warning queue %d appears to be hung!\n", i);
-			que->txr.busy = IXGBE_QUEUE_HUNG;
-			++hung;
-		}
-	}
-	/* Fire off the adminq task */
 	iflib_admin_intr_deferred(ctx);
-	/* Only truly watchdog if all queues show hung */
-	if (hung == adapter->num_rx_queues) {
-		goto watchdog;
-	} else if (queues != 0) { /* Force an IRQ on queues with work */
-		ixgbe_rearm_queues(adapter, queues);
-	}
-
-watchdog:
-	/* XXX notyet -- target requires ';' */
-	;
 }
-
-
 
 /*
 ** ixgbe_sfp_probe - called in the local timer to
@@ -3754,7 +3699,13 @@ ixgbe_if_update_admin_status(if_ctx_t ctx)
 #endif
 		}
 	}
-	/* Re-enable link interrupts */
+
+	ixgbe_check_link(&adapter->hw,
+					 &adapter->link_speed, &adapter->link_up, 0);
+	ixgbe_update_stats_counters(adapter);
+
+
+/* Re-enable link interrupts */
        IXGBE_WRITE_REG(hw, IXGBE_EIMS, IXGBE_EIMS_LSC);
 }
 
