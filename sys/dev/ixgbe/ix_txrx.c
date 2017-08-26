@@ -52,22 +52,6 @@
 #undef CSUM_SCTP
 #define CSUM_SCTP (CSUM_IP_SCTP | CSUM_IP6_SCTP)
 
-#ifdef notyet
-/*
- * HW RSC control:
- *  this feature only works with
- *  IPv4, and only on 82599 and later.
- *  Also this will cause IP forwarding to
- *  fail and that can't be controlled by
- *  the stack as LRO can. For all these
- *  reasons I've deemed it best to leave
- *  this off and not bother with a tuneable
- *  interface, this would need to be compiled
- *  to enable.
- */
-static bool ixgbe_rsc_enable = FALSE;
-#endif
-
 #ifdef IXGBE_FDIR
 /*
  * For Flow Director: this is the
@@ -366,7 +350,6 @@ ixgbe_isc_rxd_refill(void *arg, if_rxd_update_t iru)
 	}
 }
 
-#ifdef notyet
 /************************************************************************
  * ixgbe_rsc_count
  *
@@ -378,23 +361,11 @@ ixgbe_rsc_count(union ixgbe_adv_rx_desc *rx)
 	return (le32toh(rx->wb.lower.lo_dword.data) &
 	    IXGBE_RXDADV_RSCCNT_MASK) >> IXGBE_RXDADV_RSCCNT_SHIFT;
 } /* ixgbe_rsc_count */
-#endif
 
-/************************************************************************
- * ixgbe_setup_hw_rsc
- *
- *   Initialize Hardware RSC (LRO) feature on 82599
- *   for an RX ring, this is toggled by the LRO capability
- *   even though it is transparent to the stack.
- *
- *   NOTE: Since this HW feature only works with IPv4 and
- *         testing has shown soft LRO to be as effective,
- *         this feature will be disabled by default.
- ************************************************************************/
+
 static void
 ixgbe_isc_rxd_flush(void *arg, uint16_t rxqid, uint8_t flid __unused, qidx_t pidx)
 {
-
 	struct adapter *sc       = arg;
 	struct ix_rx_queue *que     = &sc->rx_queues[rxqid];
 	struct rx_ring *rxr      = &que->rxr;
@@ -452,13 +423,14 @@ ixgbe_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 
 	u16                      pkt_info, len, cidx, i;
 	u16                      vtag = 0;
-	u32                      ptype;
+	u32                      ptype, rsc;
 	u32                      staterr = 0;
 	bool                     eop;
 
 	i = 0;
 	cidx = ri->iri_cidx;
 	do {
+		rsc = 0;
 		rxd = &rxr->rx_base[cidx];
 		staterr = le32toh(rxd->wb.upper.status_error);
 		pkt_info = le16toh(rxd->wb.lower.lo_dword.hs_rss.pkt_info);
@@ -475,6 +447,12 @@ ixgbe_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 
 		rxd->wb.upper.status_error = 0;
 		eop = ((staterr & IXGBE_RXD_STAT_EOP) != 0);
+		if (!eop && rxr->hw_rsc == TRUE) {
+			u32 rsc = ixgbe_rsc_count(rxd);
+			if (rsc) {
+				rxr->rsc_num += (rsc - 1);
+			}
+		}
 		if (staterr & IXGBE_RXD_STAT_VP) {
 			vtag = le16toh(rxd->wb.upper.vlan);
 		} else {
@@ -488,14 +466,16 @@ ixgbe_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 			if (adapter->feat_en & IXGBE_FEATURE_VF)
 				if_inc_counter(ifp, IFCOUNTER_IERRORS, 1);
 #endif
-
 			rxr->rx_discarded++;
 			return (EBADMSG);
 		}
 		ri->iri_frags[i].irf_flid = 0;
 		ri->iri_frags[i].irf_idx = cidx;
 		ri->iri_frags[i].irf_len = len;
-		if (++cidx == adapter->shared->isc_nrxd[0])
+		if (rsc) {
+			cidx = (staterr & IXGBE_RXDADV_NEXTP_MASK) >>
+				IXGBE_RXDADV_NEXTP_SHIFT;
+		} else if (++cidx == adapter->shared->isc_nrxd[0])
 			cidx = 0;
 		i++;
 		/* even a 16K packet shouldn't consume more than 8 clusters */

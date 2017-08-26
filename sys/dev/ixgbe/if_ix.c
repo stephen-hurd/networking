@@ -40,6 +40,10 @@
 #include "ixgbe.h"
 #include "ifdi_if.h"
 
+#include <net/netmap.h>
+#include <sys/selinfo.h>
+#include <dev/netmap/netmap_kern.h>
+
 /************************************************************************
  * Driver version
  ************************************************************************/
@@ -169,10 +173,9 @@ static void ixgbe_setup_vlan_hw_support(if_ctx_t ctx);
 static void ixgbe_setup_optics(struct adapter *adapter);
 static void ixgbe_config_gpie(struct adapter *adapter);
 static void ixgbe_config_delay_values(struct adapter *adapter);
+static void ixgbe_rearm_queues(struct adapter *adapter, u64 queues);
 
 /* Sysctl handlers */
-static void ixgbe_set_sysctl_value(struct adapter *adapter, const char *name,
-		       const char *description, int *limit, int value);
 static int ixgbe_sysctl_flowcntl(SYSCTL_HANDLER_ARGS);
 static int ixgbe_sysctl_advertise(SYSCTL_HANDLER_ARGS);
 static int ixgbe_sysctl_interrupt_rate_handler(SYSCTL_HANDLER_ARGS);
@@ -292,17 +295,6 @@ static int ixgbe_max_interrupt_rate = (4000000 / IXGBE_LOW_LATENCY);
 SYSCTL_INT(_hw_ix, OID_AUTO, max_interrupt_rate, CTLFLAG_RDTUN,
     &ixgbe_max_interrupt_rate, 0, "Maximum interrupts per second");
 
-/* How many packets rxeof tries to clean at a time */
-static int ixgbe_rx_process_limit = 256;
-SYSCTL_INT(_hw_ix, OID_AUTO, rx_process_limit, CTLFLAG_RDTUN,
-    &ixgbe_rx_process_limit, 0, "Maximum number of received packets to process at a time, -1 means unlimited");
-
-/* How many packets txeof tries to clean at a time */
-static int ixgbe_tx_process_limit = 256;
-SYSCTL_INT(_hw_ix, OID_AUTO, tx_process_limit, CTLFLAG_RDTUN,
-    &ixgbe_tx_process_limit, 0,
-    "Maximum number of sent packets to process at a time, -1 means unlimited");
-
 /* Flow control setting, default to full */
 static int ixgbe_flow_control = ixgbe_fc_full;
 SYSCTL_INT(_hw_ix, OID_AUTO, flow_control, CTLFLAG_RDTUN,
@@ -331,19 +323,20 @@ SYSCTL_INT(_hw_ix, OID_AUTO, enable_msix, CTLFLAG_RDTUN, &ixgbe_enable_msix, 0,
     "Enable MSI-X interrupts");
 
 /*
-** Number of TX descriptors per ring,
-** setting higher than RX as this seems
-** the better performing choice.
-*/
-static int ixgbe_txd = PERFORM_TXD;
-SYSCTL_INT(_hw_ix, OID_AUTO, txd, CTLFLAG_RDTUN, &ixgbe_txd, 0,
-    "Number of transmit descriptors per queue");
+ * HW RSC control:
+ *  this feature only works with
+ *  IPv4, and only on 82599 and later.
+ *  Also this will cause IP forwarding to
+ *  fail and that can't be controlled by
+ *  the stack as LRO can. For all these
+ *  reasons I've deemed it best to leave
+ *  this off and not bother with a tuneable
+ *  interface, this would need to be compiled
+ *  to enable.
+ */
+static bool ixgbe_rsc_enable = FALSE;
 
-/* Number of RX descriptors per ring */
-static int ixgbe_rxd = PERFORM_RXD;
-SYSCTL_INT(_hw_ix, OID_AUTO, rxd, CTLFLAG_RDTUN, &ixgbe_rxd, 0,
-    "Number of receive descriptors per queue");
-
+extern int iflib_crcstrip;
 
 /*
  * Defining this on will allow the use
@@ -458,6 +451,7 @@ ixgbe_if_tx_queues_alloc(if_ctx_t ctx, caddr_t *vaddrs, uint64_t *paddrs, int nt
 	return (error);
 } /* ixgbe_attach */
 
+
 static int
 ixgbe_if_rx_queues_alloc(if_ctx_t ctx, caddr_t *vaddrs, uint64_t *paddrs, int nrxqs, int nrxqsets)
 {
@@ -494,7 +488,9 @@ ixgbe_if_rx_queues_alloc(if_ctx_t ctx, caddr_t *vaddrs, uint64_t *paddrs, int nr
 #else
 		rxr->me = i;
 #endif
-
+		/* only do 1:1 but keep door open */
+		MPASS(adapter->num_rx_queues == adapter->num_tx_queues);
+		que->txq[0] = &adapter->tx_queues[i];
 		rxr->adapter = que->adapter = adapter;
 
 		/* get the virtual and physical address of the hardware queues */
@@ -654,6 +650,66 @@ ixgbe_initialize_rss_mapping(struct adapter *adapter)
 	IXGBE_WRITE_REG(hw, IXGBE_MRQC, mrqc);
 }
 
+/************************************************************************
+ * ixgbe_setup_hw_rsc
+ *
+ *   Initialize Hardware RSC (LRO) feature on 82599
+ *   for an RX ring, this is toggled by the LRO capability
+ *   even though it is transparent to the stack.
+ *
+ *   NOTE: Since this HW feature only works with IPv4 and
+ *         testing has shown soft LRO to be as effective,
+ *         this feature will be disabled by default.
+ ************************************************************************/
+static void
+ixgbe_setup_hw_rsc(struct rx_ring *rxr)
+{
+	struct	adapter 	*adapter = rxr->adapter;
+	struct	ixgbe_hw	*hw = &adapter->hw;
+	u32			rscctrl, rdrxctl;
+
+	/* If turning LRO/RSC off we need to disable it */
+	if ((adapter->ifp->if_capenable & IFCAP_LRO) == 0) {
+		rscctrl = IXGBE_READ_REG(hw, IXGBE_RSCCTL(rxr->me));
+		rscctrl &= ~IXGBE_RSCCTL_RSCEN;
+		return;
+	}
+
+	rdrxctl = IXGBE_READ_REG(hw, IXGBE_RDRXCTL);
+	rdrxctl &= ~IXGBE_RDRXCTL_RSCFRSTSIZE;
+	if ((adapter->ifp->if_capenable & IFCAP_NETMAP && !iflib_crcstrip) ||
+	    !(adapter->ifp->if_capenable & IFCAP_NETMAP))
+		rdrxctl |= IXGBE_RDRXCTL_CRCSTRIP;
+	IXGBE_WRITE_REG(hw, IXGBE_RDRXCTL, rdrxctl);
+
+	rscctrl = IXGBE_READ_REG(hw, IXGBE_RSCCTL(rxr->me));
+	rscctrl |= IXGBE_RSCCTL_RSCEN;
+	/*
+	** Limit the total number of descriptors that
+	** can be combined, so it does not exceed 64K
+	*/
+	if (adapter->rx_mbuf_sz == MCLBYTES)
+		rscctrl |= IXGBE_RSCCTL_MAXDESC_16;
+	else if (adapter->rx_mbuf_sz == MJUMPAGESIZE)
+		rscctrl |= IXGBE_RSCCTL_MAXDESC_8;
+	else if (adapter->rx_mbuf_sz == MJUM9BYTES)
+		rscctrl |= IXGBE_RSCCTL_MAXDESC_4;
+	else  /* Using 16K cluster */
+		rscctrl |= IXGBE_RSCCTL_MAXDESC_1;
+
+	IXGBE_WRITE_REG(hw, IXGBE_RSCCTL(rxr->me), rscctrl);
+
+	/* Enable TCP header recognition */
+	IXGBE_WRITE_REG(hw, IXGBE_PSRTYPE(0),
+	    (IXGBE_READ_REG(hw, IXGBE_PSRTYPE(0)) |
+	    IXGBE_PSRTYPE_TCPHDR));
+
+	/* Disable RSC for ACK packets */
+	IXGBE_WRITE_REG(hw, IXGBE_RSCDBU,
+	    (IXGBE_RSCDBU_RSCACKDIS | IXGBE_READ_REG(hw, IXGBE_RSCDBU)));
+
+	rxr->hw_rsc = TRUE;
+}
 
 /*********************************************************************
  *
@@ -747,6 +803,8 @@ ixgbe_initialize_receive_units(if_ctx_t ctx)
 
 		/* Set the driver rx tail address */
 		rxr->tail =  IXGBE_RDT(rxr->me);
+		if (ixgbe_rsc_enable)
+			ixgbe_setup_hw_rsc(rxr);
 	}
 
 	if (adapter->hw.mac.type != ixgbe_mac_82598EB) {
@@ -927,15 +985,6 @@ ixgbe_if_attach_pre(if_ctx_t ctx)
 		device_printf(dev, "Allocation of PCI resources failed\n");
 		return (ENXIO);
 	}
-
-	/* Sysctls for limiting the amount of work done in the taskqueues */
-	ixgbe_set_sysctl_value(adapter, "rx_processing_limit",
-			       "max number of rx packets to process",
-	    &adapter->rx_process_limit, ixgbe_rx_process_limit);
-
-	ixgbe_set_sysctl_value(adapter, "tx_processing_limit",
-	    "max number of tx packets to process",
-	&adapter->tx_process_limit, ixgbe_tx_process_limit);
 
 	/* Allocate multicast array memory. */
 	adapter->mta = malloc(sizeof(*adapter->mta) *
@@ -2022,9 +2071,7 @@ ixgbe_msix_que(void *arg)
 {
 	struct ix_rx_queue	*que = arg;
 	struct adapter  *adapter = que->adapter;
-#ifdef notyet
-	struct tx_ring	*txr = &que->txr;
-#endif	
+	struct tx_ring	*txr;
 	struct rx_ring	*rxr = &que->rxr;
 	struct ifnet   *ifp = iflib_get_ifp(que->adapter->ctx);
 	u32             newitr = 0;
@@ -2038,6 +2085,9 @@ ixgbe_msix_que(void *arg)
 	
 	if (ixgbe_enable_aim == FALSE)
 		goto no_calc;
+
+	MPASS(adapter->num_rx_queues == adapter->num_tx_queues);
+	txr = &que->txq[0]->txr;
 	/*
 	** Do Adaptive Interrupt Moderation:
 	**  - Write out last calculated setting
@@ -2045,16 +2095,15 @@ ixgbe_msix_que(void *arg)
 	**    the last interval.
 	*/
 	if (que->eitr_setting) {
-	   IXGBE_WRITE_REG(&adapter->hw, IXGBE_EITR(que->msix), que->eitr_setting);
+		IXGBE_WRITE_REG(&adapter->hw, IXGBE_EITR(que->msix), que->eitr_setting);
 	}
  
 	que->eitr_setting = 0;
 
 	/* Idle, do nothing */
-#ifdef notyet
 	if ((txr->bytes) && (txr->packets))
 		newitr = txr->bytes/txr->packets;
-#endif	
+
 	if ((rxr->bytes) && (rxr->packets))
 		newitr = max(newitr,
 					 (rxr->bytes / rxr->packets));
@@ -2078,10 +2127,8 @@ ixgbe_msix_que(void *arg)
 	que->eitr_setting = newitr;
 
 	/* Reset state */
-#ifdef notyet	
 	txr->bytes = 0;
 	txr->packets = 0;
-#endif	
 	rxr->bytes = 0;
 	rxr->packets = 0;
 
@@ -2884,7 +2931,6 @@ ixgbe_if_mtu_set(if_ctx_t ctx, uint32_t mtu)
 	return error;
 }
 
-
 static void
 ixgbe_if_crcstrip_set(if_ctx_t ctx, int onoff, int crcstrip)
 {
@@ -2902,11 +2948,9 @@ ixgbe_if_crcstrip_set(if_ctx_t ctx, int onoff, int crcstrip)
 
 	hl = IXGBE_READ_REG(hw, IXGBE_HLREG0);
 	rxc = IXGBE_READ_REG(hw, IXGBE_RDRXCTL);
-#ifdef notyet
 	if (netmap_verbose)
 		D("%s read  HLREG 0x%x rxc 0x%x",
 		  onoff ? "enter" : "exit", hl, rxc);
-#endif	
 	/* hw requirements ... */
 	rxc &= ~IXGBE_RDRXCTL_RSCFRSTSIZE;
 	rxc |= IXGBE_RDRXCTL_RSCACKC;
@@ -2919,7 +2963,7 @@ ixgbe_if_crcstrip_set(if_ctx_t ctx, int onoff, int crcstrip)
 		hl |= IXGBE_HLREG0_RXCRCSTRP;
 		rxc |= IXGBE_RDRXCTL_CRCSTRIP;
 	}
-#ifdef notyet
+#ifdef DEV_NETMAP
 	if (netmap_verbose)
 		D("%s write HLREG 0x%x rxc 0x%x",
 		  onoff ? "enter" : "exit", hl, rxc);
@@ -3414,28 +3458,68 @@ ixgbe_if_timer(if_ctx_t ctx, uint16_t qid)
 	struct adapter		*adapter = iflib_get_softc(ctx);
 	struct ix_tx_queue	        *que = &adapter->tx_queues[qid];
 	u64		        queues = 0;
-
-	/* Keep track of queues with work for soft irq */
-	if (que->txr.busy)
-		queues |= ((u64)1 << que->txr.me);
+	device_t dev;
+	int hung;
 
 	if (qid != 0)
 		return;
 
+	hung = 0;
 	/* Check for pluggable optics */
-	if (adapter->sfp_probe)
-		if (!ixgbe_sfp_probe(ctx))
+	if (adapter->sfp_probe && !ixgbe_sfp_probe(ctx))
 			return; /* Nothing to do */
 
+	dev = iflib_get_dev(ctx);
 	ixgbe_check_link(&adapter->hw,
 					 &adapter->link_speed, &adapter->link_up, 0);
 	ixgbe_if_update_admin_status(ctx);
 	ixgbe_update_stats_counters(adapter);
-   
-	
+		/*
+	 * Check the TX queues status
+	 *      - mark hung queues so we don't schedule on them
+	 *      - watchdog only if all queues show hung
+	 */
+	for (int i = 0; i < adapter->num_tx_queues; i++, que++) {
+		/* Keep track of queues with work for soft irq */
+		if (que->txr.busy)
+			queues |= ((u64)1 << que->txr.me);
+		/*
+		 * Each time txeof runs without cleaning, but there
+		 * are uncleaned descriptors it increments busy. If
+		 * we get to the MAX we declare it hung.
+		 */
+		if (que->txr.busy == IXGBE_QUEUE_HUNG) {
+			++hung;
+			/* Mark the queue as inactive */
+			adapter->active_queues &= ~((u64)1 << que->txr.me);
+			continue;
+		} else {
+			/* Check if we've come back from hung */
+			if ((adapter->active_queues & ((u64)1 << que->txr.me)) == 0)
+				adapter->active_queues |= ((u64)1 << que->txr.me);
+		}
+		if (que->txr.busy >= IXGBE_MAX_TX_BUSY) {
+			device_printf(dev,
+			    "Warning queue %d appears to be hung!\n", i);
+			que->txr.busy = IXGBE_QUEUE_HUNG;
+			++hung;
+		}
+	}
 	/* Fire off the adminq task */
 	iflib_admin_intr_deferred(ctx);
+	/* Only truly watchdog if all queues show hung */
+	if (hung == adapter->num_rx_queues) {
+		goto watchdog;
+	} else if (queues != 0) { /* Force an IRQ on queues with work */
+		ixgbe_rearm_queues(adapter, queues);
+	}
+
+watchdog:
+	/* XXX notyet -- target requires ';' */
+	;
 }
+
+
 
 /*
 ** ixgbe_sfp_probe - called in the local timer to
@@ -3936,19 +4020,6 @@ ixgbe_free_pci_resources(if_ctx_t ctx)
 		bus_release_resource(dev, SYS_RES_MEMORY,
 							 PCIR_BAR(0), adapter->pci_mem);
 }
-
-/************************************************************************
- * ixgbe_set_sysctl_value
- ************************************************************************/
-static void
-ixgbe_set_sysctl_value(struct adapter *adapter, const char *name,
-    const char *description, int *limit, int value)
-{
-	*limit = value;
-	SYSCTL_ADD_INT(device_get_sysctl_ctx(adapter->dev),
-	    SYSCTL_CHILDREN(device_get_sysctl_tree(adapter->dev)),
-	    OID_AUTO, name, CTLFLAG_RW, limit, value, description);
-} /* ixgbe_set_sysctl_value */
 
 /* Sysctls */
 /*
@@ -4674,8 +4745,7 @@ ixgbe_check_fan_failure(struct adapter *adapter, u32 reg, bool in_interrupt)
 } /* ixgbe_check_fan_failure */
 
 #endif
-#ifdef notyet
-/* XXX update queue_enable? *?
+
 /************************************************************************
  * ixgbe_rearm_queues
  ************************************************************************/
@@ -4703,4 +4773,4 @@ ixgbe_rearm_queues(struct adapter *adapter, u64 queues)
 		break;
 	}
 } /* ixgbe_rearm_queues */
-#endif
+

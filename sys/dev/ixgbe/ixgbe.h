@@ -309,7 +309,6 @@ struct tx_ring {
         u64			total_packets;
 };
 
-
 /*
  * The Receive ring, one per rx queue
  */
@@ -339,6 +338,12 @@ struct rx_ring {
 	u64                     flm;
 };
 
+struct ix_tx_queue {
+	struct adapter		*adapter;
+	u32			msix;           /* This queue's MSIX vector */
+	struct tx_ring		txr;
+};
+
 /*
 ** Driver queue struct: this is the interrupt container
 **  for the associated tx and rx ring.
@@ -354,12 +359,8 @@ struct ix_rx_queue {
 	struct rx_ring		rxr;
         struct if_irq           que_irq;
 	u64			irqs;
-};
-
-struct ix_tx_queue {
-	struct adapter		*adapter;
-	u32			msix;           /* This queue's MSIX vector */
-	struct tx_ring		txr;
+	u8			ntxqs;
+	struct ix_tx_queue *txq[8];
 };
 
 #ifdef PCI_IOV
