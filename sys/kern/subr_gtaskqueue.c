@@ -494,14 +494,20 @@ static void
 gtaskqueue_thread_loop(void *arg)
 {
 	struct gtaskqueue **tqp, *tq;
+	int intr;
 
 	tqp = arg;
 	tq = *tqp;
 	gtaskqueue_run_callback(tq, TASKQUEUE_CALLBACK_TYPE_INIT);
 	TQ_LOCK(tq);
+	intr = !!(curthread->td_pflags & TDP_ITHREAD);
 	while ((tq->tq_flags & TQ_FLAGS_ACTIVE) != 0) {
 		/* XXX ? */
+		if (intr)
+			THREAD_NO_SLEEPING();
 		gtaskqueue_run_locked(tq);
+		if (intr)
+			THREAD_SLEEPING_OK();
 		/*
 		 * Because taskqueue_run() can drop tq_mutex, we need to
 		 * check if the TQ_FLAGS_ACTIVE flag wasn't removed in the
@@ -511,7 +517,12 @@ gtaskqueue_thread_loop(void *arg)
 			break;
 		TQ_SLEEP(tq, tq, &tq->tq_mutex, 0, "-", 0);
 	}
+	if (intr)
+		THREAD_NO_SLEEPING();
 	gtaskqueue_run_locked(tq);
+	if (intr)
+		THREAD_SLEEPING_OK();
+
 	/*
 	 * This thread is on its way out, so just drop the lock temporarily
 	 * in order to call the shutdown callback.  This allows the callback
@@ -956,6 +967,32 @@ taskqgroup_create(char *name)
 	LIST_INIT(&qgroup->tqg_queue[0].tgc_tasks);
 
 	return (qgroup);
+}
+
+void
+taskqgroup_set_ithread(struct taskqgroup *qgroup)
+{
+	int i, j;
+	struct gtaskqueue *gtq;
+	struct thread *td;
+
+	mtx_lock(&qgroup->tqg_lock);
+	for (i = 0; i < qgroup->tqg_cnt; i++) {
+		gtq = qgroup->tqg_queue[i].tgc_taskq;
+		for (j = 0; j < gtq->tq_tcount; j++) {
+			td = gtq->tq_threads[j];
+			thread_lock(td);
+#ifdef notyet
+			/* we need to schedule the thread from the interrupt handler for this to work */
+			TD_SET_IWAIT(td);
+			sched_class(td, PRI_ITHD);
+#endif
+			td->td_pflags |= TDP_ITHREAD;
+			sched_prio(td, PI_NET);
+			thread_unlock(td);
+		}
+	}
+	mtx_unlock(&qgroup->tqg_lock);
 }
 
 void

@@ -4510,6 +4510,7 @@ iflib_module_init(void)
 
 	iflib_timer_int = hz / 2;
 	TUNABLE_INT_FETCH("net.iflib.timer_int", &iflib_timer_int);
+	taskqgroup_set_ithread(qgroup_if_io_tqg);
 	return (0);
 }
 
