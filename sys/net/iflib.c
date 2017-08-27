@@ -2545,7 +2545,7 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 
 	mh = mt = NULL;
 	MPASS(budget > 0);
-	rx_pkts	= rx_bytes = 0;
+	rx_pkts = rx_bytes = 0;
 	if (sctx->isc_flags & IFLIB_HAS_RXCQ)
 		cidxp = &rxq->ifr_cq_cidx;
 	else
@@ -2608,7 +2608,7 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 	}
 	/* make sure that we can refill faster than drain */
 	for (i = 0, fl = &rxq->ifr_fl[0]; i < sctx->isc_nfl; i++, fl++)
-		__iflib_fl_refill_lt(ctx, fl, budget + 8);
+		__iflib_fl_refill_lt(ctx, fl, 2*budget + 8);
 
 	lro_enabled = (if_getcapenable(ifp) & IFCAP_LRO);
 	while (mh != NULL) {
@@ -2640,9 +2640,7 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 #if defined(INET6) || defined(INET)
 	tcp_lro_flush_all(&rxq->ifr_lc);
 #endif
-	if (avail)
-		return true;
-	return (iflib_rxd_avail(ctx, rxq, *cidxp, 1));
+	return (avail || iflib_rxd_avail(ctx, rxq, *cidxp, 1));
 err:
 	iflib_admin_reset_deferred(ctx);
 	return (false);
