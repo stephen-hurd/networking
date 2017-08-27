@@ -1470,7 +1470,7 @@ iflib_fast_intr_rxtx(void *arg)
 		cidx = rxq->ifr_cq_cidx;
 	else
 		cidx = rxq->ifr_fl[0].ifl_cidx;
-	if (iflib_rxd_avail(ctx, rxq, cidx, 1))
+	if (iflib_rxd_avail(ctx, rxq, cidx, 1) || (if_getcapenable(ctx->ifc_ifp) & IFCAP_NETMAP))
 		GROUPTASK_ENQUEUE(gtask);
 	else
 		IFDI_RX_QUEUE_INTR_ENABLE(ctx, rxq->ifr_id);
@@ -2574,7 +2574,7 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 
 	ifp = ctx->ifc_ifp;
 #ifdef DEV_NETMAP
-	if (ifp->if_capenable & IFCAP_NETMAP) {
+	if (if_getcapenable(ifp) & IFCAP_NETMAP) {
 		u_int work = 0;
 
 		DPRINTF("calling netmap_rx_irq\n");
@@ -3598,7 +3598,7 @@ _task_fn_tx(void *context)
 #endif
 	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
 		return;
-	if ((ifp->if_capenable & IFCAP_NETMAP)) {
+	if ((if_getcapenable(ifp) & IFCAP_NETMAP)) {
 		if (ctx->isc_txd_credits_update(ctx->ifc_softc, txq->ift_id, false))
 			netmap_tx_irq(ifp, txq->ift_id);
 		IFDI_TX_QUEUE_INTR_ENABLE(ctx, txq->ift_id);
@@ -3624,12 +3624,15 @@ _task_fn_rx(void *context)
 	bool more;
 	int rc;
 
+	if (if_getcapenable(ctx->ifc_ifp) & IFCAP_NETMAP)
+		DPRINTF("netmap rx interrupt received\n");
+
 #ifdef IFLIB_DIAGNOSTICS
 	rxq->ifr_cpu_exec_count[curcpu]++;
 #endif
 	DBG_COUNTER_INC(task_fn_rxs);
 	if (__predict_false(!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))) {
-		if (if_getcapenable(ctx->ifc_ifp) & IFCAP_NETMAP) 
+		if (if_getcapenable(ctx->ifc_ifp) & IFCAP_NETMAP)
 			DPRINTF("netmap rx interrupt but driver not running\n");
 		return;
 	}
@@ -3638,6 +3641,8 @@ _task_fn_rx(void *context)
 			IFDI_INTR_ENABLE(ctx);
 		else {
 			DBG_COUNTER_INC(rx_intr_enables);
+			if (if_getcapenable(ctx->ifc_ifp) & IFCAP_NETMAP)
+				DPRINTF("netmap rx interrupt re-enable\n");
 			rc = IFDI_RX_QUEUE_INTR_ENABLE(ctx, rxq->ifr_id);
 			KASSERT(rc != ENOTSUP, ("MSI-X support requires queue_intr_enable, but not implemented in driver"));
 		}
