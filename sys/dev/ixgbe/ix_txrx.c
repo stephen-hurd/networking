@@ -366,9 +366,8 @@ ixgbe_rsc_count(union ixgbe_adv_rx_desc *rx)
 static void
 ixgbe_isc_rxd_flush(void *arg, uint16_t rxqid, uint8_t flid __unused, qidx_t pidx)
 {
-	struct adapter *sc       = arg;
-	struct ix_rx_queue *que     = &sc->rx_queues[rxqid];
-	struct rx_ring *rxr      = &que->rxr;
+	struct adapter *sc  = arg;
+	struct rx_ring *rxr  = &sc->rx_queues[rxqid].rxr;
 
 	IXGBE_WRITE_REG(&sc->hw, rxr->tail, pidx);
 }
@@ -377,16 +376,13 @@ static int
 ixgbe_isc_rxd_available(void *arg, uint16_t rxqid, qidx_t idx, qidx_t budget)
 {
 	struct adapter *sc       = arg;
-	struct ix_rx_queue *que     = &sc->rx_queues[rxqid];
-	struct rx_ring *rxr      = &que->rxr;
-	union ixgbe_adv_rx_desc *rxd;
+	struct rx_ring *rxr      = &sc->rx_queues[rxqid].rxr;
 	u32                      staterr;
 	int                      cnt, i, nrxd;
 
 	nrxd = sc->shared->isc_nrxd[0];
 	for (cnt = 0, i = idx; cnt < nrxd-1 && cnt <= budget;) {
-		rxd = &rxr->rx_base[i];
-		staterr = le32toh(rxd->wb.upper.status_error);
+		staterr = le32toh(rxr->rx_base[i].wb.upper.status_error);
 
 		if ((staterr & IXGBE_RXD_STAT_DD) == 0)
 			break;
