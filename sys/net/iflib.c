@@ -2258,10 +2258,6 @@ iflib_init_locked(if_ctx_t ctx)
 		CALLOUT_UNLOCK(txq);
 		iflib_netmap_txq_init(ctx, txq);
 	}
-	for (i = 0, rxq = ctx->ifc_rxqs; i < sctx->isc_nrxqsets; i++, rxq++) {
-		MPASS(rxq->ifr_id == i);
-		iflib_netmap_rxq_init(ctx, rxq);
-	}
 #ifdef INVARIANTS
 	i = if_getdrvflags(ifp);
 #endif
@@ -2275,7 +2271,8 @@ iflib_init_locked(if_ctx_t ctx)
 	for (i = 0, rxq = ctx->ifc_rxqs; i < sctx->isc_nrxqsets; i++, rxq++) {
 		/* XXX this should really be done on a per-queue basis */
 		if (if_getcapenable(ifp) & IFCAP_NETMAP) {
-			DPRINTF("skip iflib_fl_setup - running netmap\n");
+			MPASS(rxq->ifr_id == i);
+			iflib_netmap_rxq_init(ctx, rxq);
 			continue;
 		}
 		for (j = 0, fl = rxq->ifr_fl; j < rxq->ifr_nfl; j++, fl++) {
