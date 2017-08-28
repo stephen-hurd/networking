@@ -94,14 +94,6 @@ __FBSDID("$FreeBSD: head/sys/net/iflib.c 302439 2016-07-08 17:04:21Z cem $");
 
 #include <sys/bitstring.h>
 
-#define NETMAP_DEBUG
-#ifdef NETMAP_DEBUG
-#define DPRINTF printf
-#else
-#define DPRINTF(...)
-#endif
-
-
 /*
  * enable accounting of every mbuf as it comes in to and goes out of
  * iflib's software descriptor references
@@ -1213,7 +1205,6 @@ iflib_netmap_rxq_init(if_ctx_t ctx, iflib_rxq_t rxq)
 	iru.iru_buf_size = rxq->ifr_fl[0].ifl_buf_size;
 	iru.iru_flidx = 0;
 
-	DPRINTF("netmap rxq_init\n");
 	for (pidx_start = i = j = 0; i < nrxd; i++, j++) {
 		int sj = netmap_idx_n2k(&na->rx_rings[rxq->ifr_id], i);
 		void *addr;
@@ -2264,8 +2255,6 @@ iflib_init_locked(if_ctx_t ctx)
 	IFDI_INIT(ctx);
 	MPASS(if_getdrvflags(ifp) == i);
 	if (!running && reset) {
-		if (if_getcapenable(ifp) & IFCAP_NETMAP) 
-			DPRINTF("not running && reset - w/ netmap\n");
 		return;
 	}
 	for (i = 0, rxq = ctx->ifc_rxqs; i < sctx->isc_nrxqsets; i++, rxq++) {
@@ -2285,9 +2274,6 @@ iflib_init_locked(if_ctx_t ctx)
 	done:
 	if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_RUNNING, IFF_DRV_OACTIVE);
 	IFDI_INTR_ENABLE(ctx);
-	if (if_getcapenable(ifp) & IFCAP_NETMAP) {
-		DPRINTF("enabling interrupts for netmap\n");
-	}
 	txq = ctx->ifc_txqs;
 	for (i = 0; i < sctx->isc_ntxqsets; i++, txq++)
 		callout_reset_on(&txq->ift_timer, iflib_timer_int, iflib_timer,
@@ -2574,7 +2560,6 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 	if (if_getcapenable(ifp) & IFCAP_NETMAP) {
 		u_int work = 0;
 
-		DPRINTF("calling netmap_rx_irq\n");
 		if (netmap_rx_irq(ifp, rxq->ifr_id, &work)) 
 			return (FALSE);
 	}
@@ -3621,16 +3606,11 @@ _task_fn_rx(void *context)
 	bool more;
 	int rc;
 
-	if (if_getcapenable(ctx->ifc_ifp) & IFCAP_NETMAP)
-		DPRINTF("netmap rx interrupt received\n");
-
 #ifdef IFLIB_DIAGNOSTICS
 	rxq->ifr_cpu_exec_count[curcpu]++;
 #endif
 	DBG_COUNTER_INC(task_fn_rxs);
 	if (__predict_false(!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))) {
-		if (if_getcapenable(ctx->ifc_ifp) & IFCAP_NETMAP)
-			DPRINTF("netmap rx interrupt but driver not running\n");
 		return;
 	}
 	if ((more = iflib_rxeof(rxq, 16 /* XXX */)) == false) {
@@ -3638,8 +3618,6 @@ _task_fn_rx(void *context)
 			IFDI_INTR_ENABLE(ctx);
 		else {
 			DBG_COUNTER_INC(rx_intr_enables);
-			if (if_getcapenable(ctx->ifc_ifp) & IFCAP_NETMAP)
-				DPRINTF("netmap rx interrupt re-enable\n");
 			rc = IFDI_RX_QUEUE_INTR_ENABLE(ctx, rxq->ifr_id);
 			KASSERT(rc != ENOTSUP, ("MSI-X support requires queue_intr_enable, but not implemented in driver"));
 		}
