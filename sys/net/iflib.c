@@ -1460,7 +1460,7 @@ iflib_fast_intr_rxtx(void *arg)
 		cidx = rxq->ifr_cq_cidx;
 	else
 		cidx = rxq->ifr_fl[0].ifl_cidx;
-	if (iflib_rxd_avail(ctx, rxq, cidx, 1) || (if_getcapenable(ctx->ifc_ifp) & IFCAP_NETMAP))
+	if (iflib_rxd_avail(ctx, rxq, cidx, 1))
 		GROUPTASK_ENQUEUE(gtask);
 	else
 		IFDI_RX_QUEUE_INTR_ENABLE(ctx, rxq->ifr_id);
@@ -2554,14 +2554,6 @@ iflib_rxeof(iflib_rxq_t rxq, qidx_t budget)
 	struct mbuf *m, *mh, *mt;
 
 	ifp = ctx->ifc_ifp;
-#ifdef DEV_NETMAP
-	if (if_getcapenable(ifp) & IFCAP_NETMAP) {
-		u_int work = 0;
-		if (netmap_rx_irq(ifp, rxq->ifr_id, &work))
-			return (FALSE);
-	}
-#endif
-
 	mh = mt = NULL;
 	MPASS(budget > 0);
 	rx_pkts = rx_bytes = 0;
@@ -3609,7 +3601,16 @@ _task_fn_rx(void *context)
 	DBG_COUNTER_INC(task_fn_rxs);
 	if (__predict_false(!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)))
 		return;
-	if ((more = iflib_rxeof(rxq, 16 /* XXX */)) == false) {
+	more = true;
+#ifdef DEV_NETMAP
+	if (if_getcapenable(ctx->ifc_ifp) & IFCAP_NETMAP) {
+		u_int work = 0;
+		if (netmap_rx_irq(ctx->ifc_ifp, rxq->ifr_id, &work)) {
+			more = false;
+		}
+	}
+#endif
+	if (more == false || (more = iflib_rxeof(rxq, 16 /* XXX */)) == false) {
 		if (ctx->ifc_flags & IFC_LEGACY)
 			IFDI_INTR_ENABLE(ctx);
 		else {
@@ -5184,7 +5185,7 @@ iflib_admin_intr_deferred(if_ctx_t ctx)
 	struct grouptask *gtask;
 
 	gtask = &ctx->ifc_admin_task;
-	MPASS(gtask->gt_taskqueue != NULL);
+	MPASS(gtask != NULL && gtask->gt_taskqueue != NULL);
 #endif
 
 	GROUPTASK_ENQUEUE(&ctx->ifc_admin_task);
