@@ -1915,11 +1915,11 @@ igb_intr_assign(if_ctx_t ctx, int msix)
         for (i = 0; i < adapter->rx_num_queues; i++, rx_que++, vector++) {
                 rid = vector + 1;
                 snprintf(buf, sizeof(buf), "rxq%d", i);
-                error = iflib_irq_alloc_generic(ctx, &rx_que->que_irq, rid, IFLIB_INTR_RXTX, em_msix_que, rx_que, rx_que->\
-me, buf);
+                error = iflib_irq_alloc_generic(ctx, &rx_que->que_irq, rid, IFLIB_INTR_RXTX,
+				em_msix_que, rx_que, rx_que->me, buf);
                 if (error) {
                         device_printf(iflib_get_dev(ctx), "Failed to allocate que int %d err: %d", i, error);
-                        adapter->rx_num_queues = i + 1;
+                        adapter->rx_num_queues = i;
                         goto fail;
                 }
 
