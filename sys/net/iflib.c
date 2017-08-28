@@ -5065,7 +5065,12 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 
 	if (tqrid != -1) {
 		cpuid = find_nth(ctx, &cpus, qid);
-		taskqgroup_attach_cpu(tqg, gtask, q, cpuid, irq->ii_rid, name);
+		err = taskqgroup_attach_cpu(tqg, gtask, q, cpuid, irq->ii_rid, name);
+		if (err) {
+			device_printf(ctx->ifc_dev, "attach failed %d\n", err);
+			return (err);
+		}
+		MPASS(gtask->gt_taskqueue != NULL);
 	} else {
 		taskqgroup_attach(tqg, gtask, q, tqrid, name);
 	}
