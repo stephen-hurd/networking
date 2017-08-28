@@ -151,7 +151,7 @@ enum {
 	/* adapter flags */
 	FULL_INIT_DONE	= (1 << 0),
 	FW_OK		= (1 << 1),
-	/* INTR_DIRECT	= (1 << 2),	No longer used. */
+	CHK_MBOX_ACCESS	= (1 << 2),
 	MASTER_PF	= (1 << 3),
 	ADAP_SYSCTL_CTX	= (1 << 4),
 	/* TOM_INIT_DONE= (1 << 5),	No longer used */
@@ -186,7 +186,6 @@ struct vi_info {
 	struct port_info *pi;
 
 	struct ifnet *ifp;
-	struct ifmedia media;
 
 	unsigned long flags;
 	int if_flags;
@@ -288,6 +287,7 @@ struct port_info {
 
 	struct link_config link_cfg;
 	struct link_config old_link_cfg;
+	struct ifmedia media;
 
 	struct timeval last_refreshed;
  	struct port_stats stats;
