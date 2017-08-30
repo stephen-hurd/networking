@@ -896,7 +896,7 @@ taskqgroup_attach_cpu(struct taskqgroup *qgroup, struct grouptask *gtask,
 			}
 		if (qid == -1) {
 			mtx_unlock(&qgroup->tqg_lock);
-			printf("qid not found for cpu=%d\n", cpu);
+			printf("%s: qid not found for cpu=%d\n", __func__, cpu);
 			return (EINVAL);
 		}
 	} else
@@ -921,13 +921,34 @@ static int
 taskqgroup_attach_cpu_deferred(struct taskqgroup *qgroup, struct grouptask *gtask)
 {
 	cpuset_t mask;
-	int i, qid, irq, cpu, error;
+	int i, qid, irq, cpu, error, cpu_max;
 
 	qid = -1;
 	irq = gtask->gt_irq;
 	cpu = gtask->gt_cpu;
 	MPASS(tqg_smp_started);
+
 	mtx_lock(&qgroup->tqg_lock);
+	/* adjust as needed */
+	for (i = 0; i < qgroup->tqg_cnt; i++)
+		if (qgroup->tqg_queue[i].tgc_cpu > cpu_max)
+			cpu_max = qgroup->tqg_queue[i].tgc_cpu;
+	MPASS(cpu <= mp_maxid);
+	if (cpu > cpu_max) {
+		error = _taskqgroup_adjust(qgroup, cpu + 1, qgroup->tqg_stride,
+					   qgroup->tqg_intr, qgroup->tqg_pri);
+		if (error) {
+			printf("_taskqgroup_adjust(%p, %d, %d, %d, %d) => %d\n\n",
+			       qgroup, cpu + 1, qgroup->tqg_stride, qgroup->tqg_intr, qgroup->tqg_pri,
+			       error);
+			mtx_unlock(&qgroup->tqg_lock);
+			return (error);
+		}
+	}
+	for (i = 0; i < qgroup->tqg_cnt; i++)
+		if (qgroup->tqg_queue[i].tgc_cpu > cpu_max)
+			cpu_max = qgroup->tqg_queue[i].tgc_cpu;
+	MPASS(cpu_max >= cpu);
 	for (i = 0; i < qgroup->tqg_cnt; i++)
 		if (qgroup->tqg_queue[i].tgc_cpu == cpu) {
 			qid = i;
@@ -935,6 +956,7 @@ taskqgroup_attach_cpu_deferred(struct taskqgroup *qgroup, struct grouptask *gtas
 		}
 	if (qid == -1) {
 		mtx_unlock(&qgroup->tqg_lock);
+		printf("%s: qid not found for cpu=%d\n", __func__, cpu);
 		return (EINVAL);
 	}
 	qgroup->tqg_queue[qid].tgc_cnt++;
