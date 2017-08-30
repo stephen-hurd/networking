@@ -1245,6 +1245,7 @@ iflib_netmap_rxq_init(if_ctx_t ctx, iflib_rxq_t rxq)
 	iflib_fl_t fl;
 	bus_dmamap_t *map;
 	int nrxd;
+	uint8_t sd_flags;
 	uint32_t i, j, pidx_start;
 
 	slot = netmap_reset(na, NR_RX, rxq->ifr_id, 0);
@@ -1252,6 +1253,7 @@ iflib_netmap_rxq_init(if_ctx_t ctx, iflib_rxq_t rxq)
 		return;
 	fl = &rxq->ifr_fl[0];
 	map = fl->ifl_sds.ifsd_map;
+	sd_flags = fl->ifl_sds.ifsd_flags;
 	nrxd = ctx->ifc_softc_ctx.isc_nrxd[0];
 	iru.iru_paddrs = fl->ifl_bus_addrs;
 	iru.iru_vaddrs = &fl->ifl_vm_addrs[0];
@@ -1260,6 +1262,7 @@ iflib_netmap_rxq_init(if_ctx_t ctx, iflib_rxq_t rxq)
 	iru.iru_buf_size = rxq->ifr_fl[0].ifl_buf_size;
 	iru.iru_flidx = 0;
 
+	bzero(sd_flags, sizeof(uint8_t)*nrxd);
 	for (pidx_start = i = j = 0; i < nrxd; i++, j++) {
 		int sj = netmap_idx_n2k(&na->rx_rings[rxq->ifr_id], i);
 		void *addr;
