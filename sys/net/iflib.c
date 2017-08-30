@@ -1245,7 +1245,7 @@ iflib_netmap_rxq_init(if_ctx_t ctx, iflib_rxq_t rxq)
 	iflib_fl_t fl;
 	bus_dmamap_t *map;
 	int nrxd;
-	uint8_t sd_flags;
+	uint8_t *sd_flags;
 	uint32_t i, j, pidx_start;
 
 	slot = netmap_reset(na, NR_RX, rxq->ifr_id, 0);
