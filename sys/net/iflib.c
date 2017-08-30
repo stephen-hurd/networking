@@ -321,9 +321,11 @@ iflib_get_sctx(if_ctx_t ctx)
 #define CTX_IS_VF(ctx) ((ctx)->ifc_sctx->isc_flags & IFLIB_IS_VF)
 
 #define RX_SW_DESC_MAP_CREATED	(1 << 0)
-#define TX_SW_DESC_MAP_CREATED	(1 << 1)
-#define RX_SW_DESC_INUSE        (1 << 3)
-#define TX_SW_DESC_MAPPED       (1 << 4)
+#define RX_SW_DESC_INUSE       (1 << 1)
+#define RX_NETMAP_INUSE	(1 << 2)
+
+#define TX_SW_DESC_MAP_CREATED	(1 << 0)
+#define TX_SW_DESC_MAPPED      (1 << 1)
 
 #define	M_TOOBIG		M_UNUSED_8
 
@@ -1262,12 +1264,12 @@ iflib_netmap_rxq_init(if_ctx_t ctx, iflib_rxq_t rxq)
 	iru.iru_buf_size = rxq->ifr_fl[0].ifl_buf_size;
 	iru.iru_flidx = 0;
 
-	bzero(sd_flags, sizeof(uint8_t)*nrxd);
 	for (pidx_start = i = j = 0; i < nrxd; i++, j++) {
 		int sj = netmap_idx_n2k(&na->rx_rings[rxq->ifr_id], i);
 		void *addr;
 
 		fl->ifl_rxd_idxs[j] = i;
+		sd_flags[i] = RX_NETMAP_INUSE;
 		addr = fl->ifl_vm_addrs[j] = PNMB(na, slot + sj, &fl->ifl_bus_addrs[j]);
 		if (map) {
 			netmap_load_map(na, rxq->ifr_fl[0].ifl_ifdi->idi_tag, *map, addr);
@@ -2080,10 +2082,20 @@ iflib_fl_bufs_free(iflib_fl_t fl)
 			if (*sd_cl != NULL)
 				uma_zfree(fl->ifl_zone, *sd_cl);
 			*sd_flags = 0;
+		} else if (*sd_flags & RX_NETMAP_INUSE) {
+			if (fl->ifl_sds.ifsd_map != NULL) {
+				bus_dmamap_t sd_map = fl->ifl_sds.ifsd_map[i];
+				bus_dmamap_unload(fl->ifl_desc_tag, sd_map);
+				bus_dmamap_destroy(fl->ifl_desc_tag, sd_map);
+			}
+			*sd_flags = 0;
+			MPASS(*sd_cl == NULL);
+			MPASS(*sd_m == NULL);
 		} else {
 			MPASS(*sd_cl == NULL);
 			MPASS(*sd_m == NULL);
 		}
+
 #if MEMORY_LOGGING
 		if (*sd_m != NULL)
 			fl->ifl_m_dequeued++;
@@ -2095,7 +2107,7 @@ iflib_fl_bufs_free(iflib_fl_t fl)
 	}
 #ifdef INVARIANTS
 	for (i = 0; i < fl->ifl_size; i++) {
-		KASSERT(fl->ifl_sds.ifsd_flags[i] == 0, ("fl->ifl_sds.ifsd_flags[%d]=%d, expected 0",
+		KASSERT(fl->ifl_sds.ifsd_flags[i] == 0, ("fl->ifl_sds.ifsd_flags[%d]=0x%x, expected 0",
 							 i, fl->ifl_sds.ifsd_flags[i]));
 		MPASS(fl->ifl_sds.ifsd_cl[i] == NULL);
 		MPASS(fl->ifl_sds.ifsd_m[i] == NULL);
