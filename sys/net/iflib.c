@@ -5140,7 +5140,7 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 
 	if (tqrid != -1) {
 		cpuid = find_nth(ctx, &cpus, qid);
-		err = taskqgroup_attach_cpu(tqg, gtask, q, cpuid, irq->ii_rid, name);
+		err = taskqgroup_attach_cpu(tqg, gtask, q, cpuid, rman_get_start(irq->ii_res), name);
 		if (err) {
 			device_printf(ctx->ifc_dev, "taskqgroup_attach_cpu failed %d\n", err);
 			return (err);
