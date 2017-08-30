@@ -186,7 +186,6 @@ struct iflib_ctx {
 	uint16_t ifc_sysctl_nrxqs;
 	uint16_t ifc_sysctl_qs_eq_override;
 	uint16_t ifc_cpuid_highest;
-
 	qidx_t ifc_sysctl_ntxds[8];
 	qidx_t ifc_sysctl_nrxds[8];
 	struct if_txrx ifc_txrx;
@@ -420,6 +419,7 @@ struct iflib_txq {
 	uint8_t		ift_qstatus;
 	uint8_t		ift_closed;
 	uint8_t		ift_update_freq;
+	uint8_t		ift_stall_count;
 	struct iflib_filter_info ift_filter_info;
 	bus_dma_tag_t		ift_desc_tag;
 	bus_dma_tag_t		ift_tso_desc_tag;
@@ -2197,20 +2197,14 @@ iflib_rx_sds_free(iflib_rxq_t rxq)
 
 /* CONFIG context only */
 static void
-iflib_handle_hang(if_ctx_t ctx, void  *arg)
+iflib_handle_hang(if_ctx_t ctx, void  *arg __unused)
 {
-	iflib_txq_t txq = arg;
 
 	CTX_LOCK(ctx);
 	if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
-	device_printf(ctx->ifc_dev,  "TX(%d) desc avail = %d, pidx = %d\n",
-				  txq->ift_id, TXQ_AVAIL(txq), txq->ift_pidx);
-
 	IFDI_WATCHDOG_RESET(ctx);
 	ctx->ifc_watchdog_events++;
-
-	ctx->ifc_flags |= IFC_DO_RESET;
-	iflib_admin_intr_deferred(ctx);
+	iflib_if_init_locked(ctx);
 	CTX_UNLOCK(ctx);
 }
 
@@ -2221,51 +2215,61 @@ iflib_handle_hang(if_ctx_t ctx, void  *arg)
 static void
 iflib_timer(void *arg)
 {
-	iflib_txq_t txq = arg;
+	iflib_txq_t txq_i, txq = arg;
 	if_ctx_t ctx = txq->ift_ctx;
-	if_softc_ctx_t sctx = &ctx->ifc_softc_ctx;
 	uint64_t pkts_total;
 	bool need_toggle;
 
 	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
 		return;
+	/* handle any laggards */
+	if (txq->ift_db_pending)
+		GROUPTASK_ENQUEUE(&txq->ift_task);
+	IFDI_TIMER(ctx, txq->ift_id);
 
-	pkts_total = if_get_counter_default(ctx->ifc_ifp, IFCOUNTER_IPACKETS);
-	/* disable entropy collection at high data rates - enable at lower rates */
-	need_toggle = ((pkts_total - ctx->ifc_rx_pkts <= IFLIB_MAX_ENTROPY_PACKETS) &&
-		       (if_getflags(ctx->ifc_ifp) & IFF_NO_ENTROPY)) ||
-		((pkts_total - ctx->ifc_rx_pkts > IFLIB_MAX_ENTROPY_PACKETS) &&
-		 !(if_getflags(ctx->ifc_ifp) & IFF_NO_ENTROPY));
-	/* We can't acquire an sx lock from swi context */
-	if (need_toggle) {
-		iflib_config_async_gtask_dispatch(ctx, iflib_toggle_entropy, "toggle entropy", NULL);
+	if (ifmp_ring_is_stalled(txq->ift_br) &&
+	    txq->ift_cleaned_prev == txq->ift_cleaned)
+		txq->ift_stall_count++;
+	txq->ift_cleaned_prev = txq->ift_cleaned;
+	if (txq->ift_stall_count > 2) {
+		txq->ift_qstatus = IFLIB_QUEUE_HUNG;
+		device_printf(ctx->ifc_dev,  "TX(%d) desc avail = %d, pidx = %d\n",
+			      txq->ift_id, TXQ_AVAIL(txq), txq->ift_pidx);
 	}
-	ctx->ifc_rx_pkts = pkts_total;
+	if (txq->ift_id != 0) {
+		if (if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)
+		callout_reset_on(&txq->ift_timer, iflib_timer_int, iflib_timer,
+				 txq, txq->ift_timer.c_cpu);
+		return;
+	}
 	/*
 	** Check on the state of the TX queue(s), this
 	** can be done without the lock because its RO
 	** and the HUNG state will be static if set.
 	*/
-	IFDI_TIMER(ctx, txq->ift_id);
-	if ((txq->ift_qstatus == IFLIB_QUEUE_HUNG) &&
-	    ((txq->ift_cleaned_prev == txq->ift_cleaned) ||
-	     (sctx->isc_pause_frames == 0)))
-		goto hung;
+	txq_i = ctx->ifc_txqs;
+	for (int i = 0; i < ctx->ifc_softc_ctx.isc_ntxqsets; i++, txq_i++) {
+		if (txq_i->ift_qstatus == IFLIB_QUEUE_HUNG) {
+			iflib_config_async_gtask_dispatch(ctx, iflib_handle_hang, "hang handler", txq);
+			/* init will reset the callout */
+			return;
+		}
+	}
 
-	if (ifmp_ring_is_stalled(txq->ift_br))
-		txq->ift_qstatus = IFLIB_QUEUE_HUNG;
-	txq->ift_cleaned_prev = txq->ift_cleaned;
-	/* handle any laggards */
-	if (txq->ift_db_pending)
-		GROUPTASK_ENQUEUE(&txq->ift_task);
+	/* disable entropy collection at high data rates - enable at lower rates */
+	pkts_total = if_get_counter_default(ctx->ifc_ifp, IFCOUNTER_IPACKETS);
+	need_toggle = ((pkts_total - ctx->ifc_rx_pkts <= IFLIB_MAX_ENTROPY_PACKETS) &&
+		       (if_getflags(ctx->ifc_ifp) & IFF_NO_ENTROPY)) ||
+		((pkts_total - ctx->ifc_rx_pkts > IFLIB_MAX_ENTROPY_PACKETS) &&
+		 !(if_getflags(ctx->ifc_ifp) & IFF_NO_ENTROPY));
+	ctx->ifc_rx_pkts = pkts_total;
+	/* We can't acquire an sx lock from swi context */
+	if (need_toggle)
+		iflib_config_async_gtask_dispatch(ctx, iflib_toggle_entropy, "toggle entropy", NULL);
 
-	sctx->isc_pause_frames = 0;
 	if (if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING) 
 		callout_reset_on(&txq->ift_timer, iflib_timer_int, iflib_timer,
 		    txq, txq->ift_timer.c_cpu);
-	return;
-hung:
-	iflib_config_async_gtask_dispatch(ctx, iflib_handle_hang, "hang handler", txq);
 }
 
 static void
@@ -2388,11 +2392,13 @@ iflib_stop(if_ctx_t ctx)
 		for (j = 0; j < txq->ift_size; j++) {
 			iflib_txsd_free(ctx, txq, j);
 		}
-		txq->ift_processed = txq->ift_cleaned = txq->ift_cidx_processed = 0;
-		txq->ift_in_use = txq->ift_gen = txq->ift_cidx = txq->ift_pidx = txq->ift_no_desc_avail = 0;
+		/* XXX please rewrite to simply bzero this range */
+		txq->ift_processed = txq->ift_cleaned = txq->ift_cleaned_prev = 0;
+		txq->ift_stall_count = txq->ift_cidx_processed = 0;
+		txq->ift_in_use = txq->ift_gen = txq->ift_cidx = txq->ift_pidx = 0;
 		txq->ift_closed = txq->ift_mbuf_defrag = txq->ift_mbuf_defrag_failed = 0;
 		txq->ift_no_tx_dma_setup = txq->ift_txd_encap_efbig = txq->ift_map_failed = 0;
-		txq->ift_pullups = 0;
+		txq->ift_no_desc_avail = txq->ift_pullups = 0;
 		ifmp_ring_reset_stats(txq->ift_br);
 		for (j = 0, di = txq->ift_ifdi; j < ctx->ifc_nhwtxqs; j++, di++)
 			bzero((void *)di->idi_vaddr, di->idi_size);
@@ -5758,6 +5764,10 @@ iflib_add_device_sysctl_pre(if_ctx_t ctx)
 		       CTLTYPE_STRING|CTLFLAG_RWTUN, ctx, IFLIB_NRXD_HANDLER,
                        mp_ndesc_handler, "A",
                        "list of # of rx descriptors to use, 0 = use default #");
+
+       SYSCTL_ADD_INT(ctx_list, oid_list, OID_AUTO, "watchdog_events",
+                      CTLFLAG_RD, &ctx->ifc_watchdog_events, 0,
+                      "Watchdog events seen since load");
 }
 
 static void
