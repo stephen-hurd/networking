@@ -2040,6 +2040,7 @@ ixgbe_if_msix_intr_assign(if_ctx_t ctx, int msix)
 		snprintf(buf, sizeof(buf), "txq%d", i);
 		tx_que = &adapter->tx_queues[i];
 		tx_que->msix = adapter->rx_queues[i % adapter->num_rx_queues].msix;
+		rid = rman_get_start(adapter->rx_queues[i % adapter->num_rx_queues].que_irq.ii_res);
 		iflib_softirq_alloc_generic(ctx, rid, IFLIB_INTR_TX, tx_que, tx_que->txr.me, buf);
 	}
 	rid = vector + 1;
