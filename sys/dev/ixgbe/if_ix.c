@@ -2036,10 +2036,10 @@ ixgbe_if_msix_intr_assign(if_ctx_t ctx, int msix)
 #endif
 
 	}
-	for (int i = 0; i < adapter->num_tx_queues; i++) {
+	for (int i = 0, rid = 1; i < adapter->num_tx_queues; i++, rid++) {
 		snprintf(buf, sizeof(buf), "txq%d", i);
 		tx_que = &adapter->tx_queues[i];
-		tx_que->msix = i % adapter->num_rx_queues;
+		tx_que->msix = adapter->rx_queues[i % adapter->num_rx_queues].msix;
 		iflib_softirq_alloc_generic(ctx, rid, IFLIB_INTR_TX, tx_que, tx_que->txr.me, buf);
 	}
 	rid = vector + 1;
@@ -3852,10 +3852,12 @@ ixgbe_if_rx_queue_intr_enable(if_ctx_t ctx, uint16_t rxqid)
 static int
 ixgbe_if_tx_queue_intr_enable(if_ctx_t ctx, uint16_t txqid)
 {
+#ifdef notyet
 	struct adapter	*adapter = iflib_get_softc(ctx);
 	struct ix_tx_queue *que = &adapter->tx_queues[txqid];
 
 	ixgbe_enable_queue(adapter, que->txr.me);
+#endif
 	return (0);
 }
 
