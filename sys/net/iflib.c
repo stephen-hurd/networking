@@ -2095,7 +2095,8 @@ iflib_fl_bufs_free(iflib_fl_t fl)
 	}
 #ifdef INVARIANTS
 	for (i = 0; i < fl->ifl_size; i++) {
-		MPASS(fl->ifl_sds.ifsd_flags[i] == 0);
+		KASSERT(fl->ifl_sds.ifsd_flags[i] == 0, ("fl->ifl_sds.ifsd_flags[%d]=%d, expected 0",
+							 i, fl->ifl_sds.ifsd_flags[i]));
 		MPASS(fl->ifl_sds.ifsd_cl[i] == NULL);
 		MPASS(fl->ifl_sds.ifsd_m[i] == NULL);
 	}
