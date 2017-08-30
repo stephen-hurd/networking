@@ -5126,6 +5126,99 @@ find_nth(if_ctx_t ctx, cpuset_t *cpus, int qid)
 	return (cpuid-1);
 }
 
+static int
+find_child_with_core(int cpu, struct cpu_group *grp)
+{
+	int i;
+
+	if (grp->cg_children == 0)
+		return -1;
+
+	MPASS(grp->cg_child);
+	for (i = 0; i < grp->cg_children; i++) {
+		if (CPU_ISSET(cpu, &grp->cg_child[i].cg_mask))
+			return i;
+	}
+
+	return -1;
+}
+
+/*
+ * Find the nth thread on the specified core
+ */
+static int
+find_thread(int cpu, int thread_num)
+{
+	struct cpu_group *grp;
+	int i;
+	cpuset_t cs;
+
+	grp = smp_topo();
+	if (grp == NULL)
+		return cpu;
+	i = 0;
+	while ((i = find_child_with_core(cpu, grp)) != -1) {
+		/* If the child only has one cpu, don't descend */
+		if (grp->cg_child[i].cg_count <= 1)
+			break;
+		grp = &grp->cg_child[i];
+	}
+
+	/* If they don't share at least an L2 cache, use the same CPU */
+	if (grp->cg_level > CG_SHARE_L2 || grp->cg_level == CG_SHARE_NONE)
+		return cpu;
+
+	/* Now pick one */
+	CPU_COPY(&grp->cg_mask, &cs);
+	for (i = thread_num % grp->cg_count; i > 0; i--) {
+		MPASS(CPU_FFS(&cs));
+		CPU_CLR(CPU_FFS(&cs) - 1, &cs);
+	}
+	MPASS(CPU_FFS(&cs));
+	return CPU_FFS(&cs) - 1;
+}
+
+static int
+get_thread_num(if_ctx_t ctx, iflib_intr_type_t type, int qid)
+{
+	switch (type) {
+	case IFLIB_INTR_TX:
+		/* TX queues get threads on the same core as the corresponding RX queue */
+		/* XXX handle multiple RX threads per core and more than two threads per core */
+		return qid / CPU_COUNT(&ctx->ifc_cpus) + 1;
+	case IFLIB_INTR_RX:
+	case IFLIB_INTR_RXTX:
+		/* RX queues get the first thread on their core */
+		return qid / CPU_COUNT(&ctx->ifc_cpus);
+	default:
+		return -1;
+	}
+}
+
+/* Just to avoid copy/paste */
+static inline int
+iflib_irq_set_affinity(if_ctx_t ctx, int irq, iflib_intr_type_t type, int qid,
+    struct grouptask *gtask, struct taskqgroup *tqg, void *uniq, char *name)
+{
+	cpuset_t cpus;
+	int cpuid;
+	int err, tid;
+
+	cpuid = find_nth(ctx, &cpus, qid);
+	tid = get_thread_num(ctx, type, qid);
+	MPASS(tid >= 0);
+	cpuid = find_thread(cpuid, tid);
+	err = taskqgroup_attach_cpu(tqg, gtask, uniq, cpuid, irq, name);
+	if (err) {
+		device_printf(ctx->ifc_dev, "taskqgroup_attach_cpu failed %d\n", err);
+		return (err);
+	}
+	if (cpuid > ctx->ifc_cpuid_highest)
+		ctx->ifc_cpuid_highest = cpuid;
+	MPASS(gtask->gt_taskqueue != NULL);
+	return 0;
+}
+
 int
 iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 						iflib_intr_type_t type, driver_filter_t *filter,
@@ -5134,9 +5227,8 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 	struct grouptask *gtask;
 	struct taskqgroup *tqg;
 	iflib_filter_info_t info;
-	cpuset_t cpus;
 	gtask_fn_t *fn;
-	int tqrid, err, cpuid;
+	int tqrid, err;
 	driver_filter_t *intr_fast;
 	void *q;
 
@@ -5199,15 +5291,9 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 		return (0);
 
 	if (tqrid != -1) {
-		cpuid = find_nth(ctx, &cpus, qid);
-		err = taskqgroup_attach_cpu(tqg, gtask, q, cpuid, rman_get_start(irq->ii_res), name);
-		if (err) {
-			device_printf(ctx->ifc_dev, "taskqgroup_attach_cpu failed %d\n", err);
+		err = iflib_irq_set_affinity(ctx, rman_get_start(irq->ii_res), type, qid, gtask, tqg, q, name);
+		if (err)
 			return (err);
-		}
-		if (cpuid > ctx->ifc_cpuid_highest)
-			ctx->ifc_cpuid_highest = cpuid;
-		MPASS(gtask->gt_taskqueue != NULL);
 	} else {
 		taskqgroup_attach(tqg, gtask, q, tqrid, name);
 	}
@@ -5222,6 +5308,7 @@ iflib_softirq_alloc_generic(if_ctx_t ctx, int rid, iflib_intr_type_t type,  void
 	struct taskqgroup *tqg;
 	gtask_fn_t *fn;
 	void *q;
+	int err;
 
 	switch (type) {
 	case IFLIB_INTR_TX:
@@ -5247,7 +5334,14 @@ iflib_softirq_alloc_generic(if_ctx_t ctx, int rid, iflib_intr_type_t type,  void
 		panic("unknown net intr type");
 	}
 	GROUPTASK_INIT(gtask, 0, fn, q);
-	taskqgroup_attach(tqg, gtask, q, rid, name);
+	if (rid != -1) {
+		err = iflib_irq_set_affinity(ctx, rid, type, qid, gtask, tqg, q, name);
+		if (err)
+			taskqgroup_attach(tqg, gtask, q, rid, name);
+	}
+	else {
+		taskqgroup_attach(tqg, gtask, q, rid, name);
+	}
 }
 
 void
