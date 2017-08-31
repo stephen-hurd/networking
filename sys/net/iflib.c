@@ -515,9 +515,11 @@ struct iflib_rxq {
 	struct grouptask        ifr_task;
 	struct iflib_filter_info ifr_filter_info;
 	iflib_dma_info_t		ifr_ifdi;
-
+	struct if_rxd_info		ifr_ri;
+	struct if_rxd_update	ifr_iru;
 	/* dynamically allocate if any drivers need a value substantially larger than this */
 	struct if_rxd_frag	ifr_frags[IFLIB_MAX_RX_SEGS] __aligned(CACHE_LINE_SIZE);
+
 #ifdef IFLIB_DIAGNOSTICS
 	uint64_t ifr_cpu_exec_count[256];
 #endif
@@ -1035,13 +1037,15 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 	u_int const lim = kring->nkr_num_slots - 1;
 	u_int const head = kring->rhead;
 	int force_update = (flags & NAF_FORCE_READ) || kring->nr_kflags & NKR_PENDINTR;
-	struct if_rxd_info ri;
-	struct if_rxd_update iru;
+	struct if_rxd_info *ri;
+	struct if_rxd_update *iru;
 
 	struct ifnet *ifp = na->ifp;
 	if_ctx_t ctx = ifp->if_softc;
 	iflib_rxq_t rxq = &ctx->ifc_rxqs[kring->ring_id];
 	iflib_fl_t fl = rxq->ifr_fl;
+	ri = &rxq->ifr_ri;
+	iru = &rxq->ifr_iru;
 	if (head > lim)
 		return netmap_ring_reinit(kring);
 
@@ -1077,14 +1081,14 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 			nm_i = netmap_idx_n2k(kring, nic_i);
 			avail = iflib_rxd_avail(ctx, rxq, nic_i, USHRT_MAX);
 			for (n = 0; avail > 0; n++, avail--) {
-				rxd_info_zero(&ri);
-				ri.iri_frags = rxq->ifr_frags;
-				ri.iri_qsidx = kring->ring_id;
-				ri.iri_ifp = ctx->ifc_ifp;
-				ri.iri_cidx = nic_i;
+				rxd_info_zero(ri);
+				ri->iri_frags = rxq->ifr_frags;
+				ri->iri_qsidx = kring->ring_id;
+				ri->iri_ifp = ctx->ifc_ifp;
+				ri->iri_cidx = nic_i;
 
-				error = ctx->isc_rxd_pkt_get(ctx->ifc_softc, &ri);
-				ring->slot[nm_i].len = error ? 0 : ri.iri_len - crclen;
+				error = ctx->isc_rxd_pkt_get(ctx->ifc_softc, ri);
+				ring->slot[nm_i].len = error ? 0 : ri->iri_len - crclen;
 				ring->slot[nm_i].flags = slot_flags;
 				if (fl->ifl_sds.ifsd_map)
 					bus_dmamap_sync(fl->ifl_ifdi->idi_tag,
@@ -1117,12 +1121,12 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 	if (nm_i == head)
 		return (0);
 
-	iru.iru_paddrs = fl->ifl_bus_addrs;
-	iru.iru_vaddrs = &fl->ifl_vm_addrs[0];
-	iru.iru_idxs = fl->ifl_rxd_idxs;
-	iru.iru_qsidx = rxq->ifr_id;
-	iru.iru_buf_size = fl->ifl_buf_size;
-	iru.iru_flidx = fl->ifl_id;
+	iru->iru_paddrs = fl->ifl_bus_addrs;
+	iru->iru_vaddrs = &fl->ifl_vm_addrs[0];
+	iru->iru_idxs = fl->ifl_rxd_idxs;
+	iru->iru_qsidx = rxq->ifr_id;
+	iru->iru_buf_size = fl->ifl_buf_size;
+	iru->iru_flidx = fl->ifl_id;
 	nic_i_start = nic_i = netmap_idx_k2n(kring, nm_i);
 	for (i = 0; nm_i != head; i++) {
 		struct netmap_slot *slot = &ring->slot[nm_i];
@@ -1143,16 +1147,16 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 		if (nm_i != head && i < IFLIB_MAX_RX_REFRESH)
 			continue;
 
-		iru.iru_pidx = nic_i_start;
-		iru.iru_count = i;
+		iru->iru_pidx = nic_i_start;
+		iru->iru_count = i;
 		i = 0;
-		ctx->isc_rxd_refill(ctx->ifc_softc, &iru);
+		ctx->isc_rxd_refill(ctx->ifc_softc, iru);
 		if (fl->ifl_sds.ifsd_map == NULL) {
 			nic_i_start = nic_i;
 			continue;
 		}
 		nic_i = nic_i_start;
-		for (n = 0; n < iru.iru_count; n++) {
+		for (n = 0; n < iru->iru_count; n++) {
 			bus_dmamap_sync(fl->ifl_ifdi->idi_tag, fl->ifl_sds.ifsd_map[nic_i],
 					BUS_DMASYNC_PREREAD);
 			nic_i = nm_next(nic_i, lim);
@@ -1170,7 +1174,7 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 	 */
 	nic_i = nm_prev(nic_i, lim);
 	ctx->isc_rxd_flush(ctx->ifc_softc, rxq->ifr_id, fl->ifl_id, nic_i);
-	return 0;
+	return (0);
 
 ring_reset:
 	return netmap_ring_reinit(kring);
