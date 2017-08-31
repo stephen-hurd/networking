@@ -556,8 +556,9 @@ lem_isc_rxd_available(void *arg, uint16_t rxqid, qidx_t idx, qidx_t budget)
 	struct e1000_rx_desc *rxd;
 	u32 staterr = 0;
 	int cnt, i;
+	budget = min(budget, scctx->isc_nrxd[0] -1);
 
-	for (cnt = 0, i = idx; cnt < scctx->isc_nrxd[0] && cnt <= budget;) {
+	for (cnt = 0, i = idx; cnt <= budget;) {
 		rxd = (struct e1000_rx_desc *)&rxr->rx_base[i];
 		staterr = rxd->status;
 
@@ -570,6 +571,7 @@ lem_isc_rxd_available(void *arg, uint16_t rxqid, qidx_t idx, qidx_t budget)
 		if (staterr & E1000_RXD_STAT_EOP)
 			cnt++;
 	}
+	MPASS(cnt <= scctx->isc_nrxd[0]);
 	return (cnt);
 }
 
@@ -583,8 +585,9 @@ em_isc_rxd_available(void *arg, uint16_t rxqid, qidx_t idx, qidx_t budget)
 	union e1000_rx_desc_extended *rxd;
 	u32 staterr = 0;
 	int cnt, i;
+	budget = min(budget, scctx->isc_nrxd[0] -1);
 
-	for (cnt = 0, i = idx; cnt < scctx->isc_nrxd[0] && cnt <= budget;) {
+	for (cnt = 0, i = idx; cnt <= budget;) {
 		rxd = &rxr->rx_base[i];
 		staterr = le32toh(rxd->wb.upper.status_error);
 
@@ -599,6 +602,7 @@ em_isc_rxd_available(void *arg, uint16_t rxqid, qidx_t idx, qidx_t budget)
 			cnt++;
 
 	}
+	MPASS(cnt <= scctx->isc_nrxd[0]);
 	return (cnt);
 }
 
