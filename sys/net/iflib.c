@@ -1121,6 +1121,7 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 	if (nm_i == head)
 		return (0);
 
+	fl = rxq->ifr_fl;
 	iru->iru_paddrs = fl->ifl_bus_addrs;
 	iru->iru_vaddrs = &fl->ifl_vm_addrs[0];
 	iru->iru_idxs = fl->ifl_rxd_idxs;
