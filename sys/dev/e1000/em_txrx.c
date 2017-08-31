@@ -687,7 +687,8 @@ em_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 		pkt_info = le32toh(rxd->wb.lower.mrq);
 
 		/* Error Checking then decrement count */
-		MPASS ((staterr & E1000_RXD_STAT_DD) != 0);
+		KASSERT(staterr & E1000_RXD_STAT_DD,
+			("cidx=%d i=%d iri_len=%d", cidx, i, ri->iri_len));
 
 		len = le16toh(rxd->wb.upper.length);
 		ri->iri_len += len;
