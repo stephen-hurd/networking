@@ -699,7 +699,7 @@ taskqgroup_cpu_create(struct taskqgroup *qgroup, int idx, int cpu, bool intr, in
 
 	qcpu = &qgroup->tqg_queue[idx];
 	LIST_INIT(&qcpu->tgc_tasks);
-	qcpu->tgc_taskq = gtaskqueue_create_fast(NULL, M_WAITOK,
+	qcpu->tgc_taskq = gtaskqueue_create_fast(NULL, M_WAITOK | M_ZERO,
 	    taskqueue_thread_enqueue, &qcpu->tgc_taskq);
 	gtaskqueue_start_threads(&qcpu->tgc_taskq, 1, pri,
 	    intr, "%s_%d", qgroup->tqg_name, idx);
@@ -903,11 +903,18 @@ taskqgroup_attach_cpu(struct taskqgroup *qgroup, struct grouptask *gtask,
 
 	mtx_lock(&qgroup->tqg_lock);
 	if (tqg_smp_started) {
-		for (i = 0; i < qgroup->tqg_cnt; i++)
+		for (i = 0; i < qgroup->tqg_cnt; i++) {
 			if (qgroup->tqg_queue[i].tgc_cpu == cpu) {
 				qid = i;
 				break;
 			}
+#ifdef INVARIANTS
+			else
+				printf("qgroup->tqg_queue[%d].tgc_cpu=0x%x tgc_cnt=0x%x\n",
+				       i, qgroup->tqg_queue[i].tgc_cpu, qgroup->tqg_queue[i].tgc_cnt);
+
+#endif
+		}
 		if (qid == -1) {
 			mtx_unlock(&qgroup->tqg_lock);
 			printf("%s: qid not found for cpu=%d\n", __func__, cpu);
@@ -1197,7 +1204,9 @@ taskqgroup_create(char *name)
 	mtx_init(&qgroup->tqg_lock, "taskqgroup", NULL, MTX_DEF);
 	qgroup->tqg_name = name;
 	LIST_INIT(&qgroup->tqg_queue[0].tgc_tasks);
-
+	MPASS(qgroup->tqg_queue[0].tgc_cnt == 0);
+	MPASS(qgroup->tqg_queue[0].tgc_cpu == 0);
+	MPASS(qgroup->tqg_queue[0].tgc_taskq == 0);
 	return (qgroup);
 }
 
