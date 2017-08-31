@@ -172,6 +172,8 @@ struct iflib_ctx {
 	int ifc_link_state;
 	int ifc_link_irq;
 	int ifc_watchdog_events;
+	uint16_t *ifc_txq_cpumap;
+
 	struct cdev *ifc_led_dev;
 	struct resource *ifc_msix_mem;
 
@@ -2324,6 +2326,9 @@ iflib_init_locked(if_ctx_t ctx)
 		CALLOUT_UNLOCK(txq);
 		iflib_netmap_txq_init(ctx, txq);
 	}
+	for (i = 0; i <= MAXCPU; i++)
+		ctx->ifc_txq_cpumap[i] = UINT16_MAX;
+
 #ifdef INVARIANTS
 	i = if_getdrvflags(ifp);
 #endif
@@ -3811,9 +3816,9 @@ static int
 iflib_if_transmit(if_t ifp, struct mbuf *m)
 {
 	if_ctx_t	ctx = if_getsoftc(ifp);
-
 	iflib_txq_t txq;
 	int err, qidx;
+	uint16_t cpu;
 
 	if (__predict_false((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0 || !LINK_ACTIVE(ctx))) {
 		DBG_COUNTER_INC(tx_frees);
@@ -3823,8 +3828,21 @@ iflib_if_transmit(if_t ifp, struct mbuf *m)
 
 	MPASS(m->m_nextpkt == NULL);
 	qidx = 0;
-	if ((NTXQSETS(ctx) > 1) && M_HASHTYPE_GET(m))
-		qidx = QIDX(ctx, m);
+	if (NTXQSETS(ctx) > 1) {
+		cpu = PCPU_GET(cpuid);
+		MPASS(cpu <= MAXCPU);
+		if (__predict_true(ctx->ifc_txq_cpumap != NULL))
+			qidx = ctx->ifc_txq_cpumap[cpu];
+		else
+			qidx = UINT16_MAX;
+		if (qidx == UINT16_MAX) {
+			if (M_HASHTYPE_GET(m))
+				qidx = QIDX(ctx, m);
+			else
+				qidx = 0;
+		}
+	}
+
 	/*
 	 * XXX calculate buf_ring based on flowid (divvy up bits?)
 	 */
@@ -4195,6 +4213,11 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 	ctx->ifc_dev = dev;
 	ctx->ifc_softc = sc;
 
+	ctx->ifc_txq_cpumap = malloc(sizeof(ctx->ifc_txq_cpumap[0]) * (MAXCPU + 1), M_IFLIB, flags);
+	/* XXX Paranoia */
+	for (i = 0; i <= MAXCPU; i++)
+		ctx->ifc_txq_cpumap[i] = UINT16_MAX;
+
 	if ((err = iflib_register(ctx)) != 0) {
 		device_printf(dev, "iflib_register failed %d\n", err);
 		return (err);
@@ -4514,6 +4537,8 @@ iflib_device_deregister(if_ctx_t ctx)
 
 	iflib_tx_structures_free(ctx);
 	iflib_rx_structures_free(ctx);
+	if (ctx->ifc_txq_cpumap != NULL)
+		free(ctx->ifc_txq_cpumap, M_IFLIB);
 	if (ctx->ifc_flags & IFC_SC_ALLOCATED)
 		free(ctx->ifc_softc, M_IFLIB);
 	iflib_ctx_remove(ctx);
@@ -5134,6 +5159,31 @@ find_thread(int cpu, int thread_num)
 	return CPU_FFS(&cs) - 1;
 }
 
+/*
+ * Fills in a qidx in ctx->ifc_txq_cpumap
+ * Always fills in the specified cpu, and will replace UINT16_MAX with the cpu
+ * ID for cpus that share an L2 cache.
+ */
+static void
+fill_txq_cpumap(if_ctx_t ctx, int cpu, int qidx)
+{
+	int i, tcpu, first;
+
+	if (ctx->ifc_txq_cpumap == NULL)
+		return;
+	MPASS(cpu > 0 && CPU <= MAXCPU);
+	ctx->ifc_txq_cpumap[cpu] = qidx;
+
+	i = 0;
+	first = tcpu = find_thread(cpu, i);
+	do {
+		if (ctx->ifc_txq_cpumap[tcpu] == UINT16_MAX)
+			ctx->ifc_txq_cpumap[tcpu] = qidx;
+		i++;
+		tcpu = find_thread(cpu, i);
+	} while (tcpu != first);
+}
+
 static int
 get_thread_num(if_ctx_t ctx, iflib_intr_type_t type, int qid)
 {
@@ -5169,6 +5219,8 @@ iflib_irq_set_affinity(if_ctx_t ctx, int irq, iflib_intr_type_t type, int qid,
 		device_printf(ctx->ifc_dev, "taskqgroup_attach_cpu failed %d\n", err);
 		return (err);
 	}
+	if (type == IFLIB_INTR_TX || type == IFLIB_INTR_RXTX)
+		fill_txq_cpumap(ctx, cpuid, qid);
 	if (cpuid > ctx->ifc_cpuid_highest)
 		ctx->ifc_cpuid_highest = cpuid;
 	MPASS(gtask->gt_taskqueue != NULL);
