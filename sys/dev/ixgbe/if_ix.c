@@ -3998,7 +3998,7 @@ ixgbe_sysctl_flowcntl(SYSCTL_HANDLER_ARGS)
 		return (error);
 
 	/* Don't bother if it's not changed */
-	if (fc == adapter->hw.fc.current_mode)
+	if (fc == adapter->hw.fc.current_mode && fc == adapter->hw.fc.requested_mode && fc == adapter->fc)
 		return (0);
 
 	return ixgbe_set_flowcntl(adapter, fc);
