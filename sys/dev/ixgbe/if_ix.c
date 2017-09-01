@@ -287,7 +287,7 @@ static SYSCTL_NODE(_hw, OID_AUTO, ix, CTLFLAG_RD, 0, "IXGBE driver parameters");
  * is varied over time based on the
  * traffic for that interrupt vector
  */
-static int ixgbe_enable_aim = TRUE;
+static int ixgbe_enable_aim = FALSE;
 SYSCTL_INT(_hw_ix, OID_AUTO, enable_aim, CTLFLAG_RDTUN, &ixgbe_enable_aim, 0,
     "Enable adaptive interrupt moderation");
 
