@@ -79,6 +79,9 @@ static void     ixv_identify_hardware(if_ctx_t ctx);
 static int      ixv_allocate_pci_resources(if_ctx_t ctx);
 static void	ixv_free_pci_resources(if_ctx_t ctx);
 static int      ixv_setup_interface(if_ctx_t ctx);
+
+static int      ixv_negotiate_api(struct adapter *);
+
 static void     ixv_if_media_status(if_ctx_t , struct ifmediareq *);
 static int      ixv_if_media_change(if_ctx_t ctx); 
 static void     ixv_if_update_admin_status(if_ctx_t ctx);
@@ -121,10 +124,6 @@ static int	ixv_msix_mbx(void *);
 /*********************************************************************
  *  FreeBSD Device Interface Entry Points
  *********************************************************************/
-
-/************************************************************************
- * FreeBSD Device Interface Entry Points
- ************************************************************************/
 static device_method_t ixv_methods[] = {
 	/* Device interface */
 	DEVMETHOD(device_register, ixv_register),
@@ -481,11 +480,10 @@ ixv_if_attach_pre(if_ctx_t ctx)
 	}
 
 	/* Negotiate mailbox API version */
-	error = ixgbevf_negotiate_api_version(hw, ixgbe_mbox_api_12);
+	error = ixv_negotiate_api(adapter);
 	if (error) {
-		device_printf(dev, "MBX API 1.2 negotiation failed! Error %d\n",
-		    error);
-		error = EIO;
+		device_printf(dev,
+		    "Mailbox API negotiation failed during attach!\n");
 		goto err_out;
 	}
 
@@ -698,10 +696,13 @@ ixv_if_init(if_ctx_t ctx)
 	hw->addr_ctrl.rar_used_count = 1;
 
 	/* Reset VF and renegotiate mailbox API version */
-	ixgbe_reset_hw(hw);
-	error = ixgbevf_negotiate_api_version(hw, ixgbe_mbox_api_11);
-	if (error)
-		device_printf(dev, "MBX API 1.1 negotiation failed! Error %d\n", error);
+	hw->mac.ops.reset_hw(hw);
+	error = ixv_negotiate_api(adapter);
+	if (error) {
+		device_printf(dev,
+		    "Mailbox API negotiation failed in init_locked!\n");
+		return;
+	}
 
 	ixv_initialize_transmit_units(ctx);
 
@@ -936,6 +937,31 @@ ixv_if_media_change(if_ctx_t ctx)
 
 	return (0);
 } /* ixv_media_change */
+
+
+/************************************************************************
+ * ixv_negotiate_api
+ *
+ *   Negotiate the Mailbox API with the PF;
+ *   start with the most featured API first.
+ ************************************************************************/
+static int
+ixv_negotiate_api(struct adapter *adapter)
+{
+	struct ixgbe_hw *hw = &adapter->hw;
+	int             mbx_api[] = { ixgbe_mbox_api_11,
+	                              ixgbe_mbox_api_10,
+	                              ixgbe_mbox_api_unknown };
+	int             i = 0;
+
+	while (mbx_api[i] != ixgbe_mbox_api_unknown) {
+		if (ixgbevf_negotiate_api_version(hw, mbx_api[i]) == 0)
+			return (0);
+		i++;
+	}
+
+	return (EINVAL);
+} /* ixv_negotiate_api */
 
 
 /************************************************************************
