@@ -528,8 +528,8 @@ em_isc_rxd_refill(void *arg, if_rxd_update_t iru)
 	for (i = 0, next_pidx = pidx; i < count; i++) {
 		rxd = &rxr->rx_base[next_pidx];
 		rxd->read.buffer_addr = htole64(paddrs[i]);
-		/* DD bits must be cleared */
-		rxd->wb.upper.status_error = 0;
+		/* Zero out rx desc status */
+		rxd->wb.upper.status_error &= htole32(~0xFF);
 
 		if (++next_pidx == scctx->isc_nrxd[0])
 			next_pidx = 0;
