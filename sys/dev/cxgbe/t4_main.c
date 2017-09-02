@@ -5416,6 +5416,12 @@ t4_sysctls(struct adapter *sc)
 		    NULL, "TOE parameters");
 		children = SYSCTL_CHILDREN(oid);
 
+		sc->tt.cong_algorithm = -1;
+		SYSCTL_ADD_INT(ctx, children, OID_AUTO, "cong_algorithm",
+		    CTLFLAG_RW, &sc->tt.cong_algorithm, 0, "congestion control "
+		    "(-1 = default, 0 = reno, 1 = tahoe, 2 = newreno, "
+		    "3 = highspeed)");
+
 		sc->tt.sndbuf = 256 * 1024;
 		SYSCTL_ADD_INT(ctx, children, OID_AUTO, "sndbuf", CTLFLAG_RW,
 		    &sc->tt.sndbuf, 0, "max hardware send buffer size");
@@ -9049,7 +9055,14 @@ load_fw(struct adapter *sc, struct t4_data *fw)
 	if (rc)
 		return (rc);
 
-	if (sc->flags & FULL_INIT_DONE) {
+	/*
+	 * The firmware, with the sole exception of the memory parity error
+	 * handler, runs from memory and not flash.  It is almost always safe to
+	 * install a new firmware on a running system.  Just set bit 1 in
+	 * hw.cxgbe.dflags or dev.<nexus>.<n>.dflags first.
+	 */
+	if (sc->flags & FULL_INIT_DONE &&
+	    (sc->debug_flags & DF_LOAD_FW_ANYTIME) == 0) {
 		rc = EBUSY;
 		goto done;
 	}

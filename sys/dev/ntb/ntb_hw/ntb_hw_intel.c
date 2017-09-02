@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2016 Alexander Motin <mav@FreeBSD.org>
+ * Copyright (c) 2016-2017 Alexander Motin <mav@FreeBSD.org>
  * Copyright (C) 2013 Intel Corporation
  * Copyright (C) 2015 EMC Corporation
  * All rights reserved.
@@ -61,7 +61,7 @@ __FBSDID("$FreeBSD$");
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 
-#include "ntb_regs.h"
+#include "ntb_hw_intel.h"
 #include "../ntb.h"
 
 #define MAX_MSIX_INTERRUPTS MAX(XEON_DB_COUNT, ATOM_DB_COUNT)
@@ -2689,7 +2689,7 @@ reschedule:
 	ntb->lnk_sta = pci_read_config(ntb->device, ntb->reg->lnk_sta, 2);
 	if (_xeon_link_is_up(ntb)) {
 		callout_reset(&ntb->peer_msix_work,
-		    hz * (ntb->peer_msix_good ? 2 : 1) / 100,
+		    hz * (ntb->peer_msix_good ? 2 : 1) / 10,
 		    intel_ntb_exchange_msix, ntb);
 	} else
 		intel_ntb_spad_clear(ntb->device);
@@ -3085,6 +3085,9 @@ static device_method_t ntb_intel_methods[] = {
 	DEVMETHOD(device_probe,		intel_ntb_probe),
 	DEVMETHOD(device_attach,	intel_ntb_attach),
 	DEVMETHOD(device_detach,	intel_ntb_detach),
+	/* Bus interface */
+	DEVMETHOD(bus_child_location_str, ntb_child_location_str),
+	DEVMETHOD(bus_print_child,	ntb_print_child),
 	/* NTB interface */
 	DEVMETHOD(ntb_link_is_up,	intel_ntb_link_is_up),
 	DEVMETHOD(ntb_link_enable,	intel_ntb_link_enable),
@@ -3116,6 +3119,6 @@ static device_method_t ntb_intel_methods[] = {
 
 static DEFINE_CLASS_0(ntb_hw, ntb_intel_driver, ntb_intel_methods,
     sizeof(struct ntb_softc));
-DRIVER_MODULE(ntb_intel, pci, ntb_intel_driver, ntb_hw_devclass, NULL, NULL);
-MODULE_DEPEND(ntb_intel, ntb, 1, 1, 1);
-MODULE_VERSION(ntb_intel, 1);
+DRIVER_MODULE(ntb_hw_intel, pci, ntb_intel_driver, ntb_hw_devclass, NULL, NULL);
+MODULE_DEPEND(ntb_hw_intel, ntb, 1, 1, 1);
+MODULE_VERSION(ntb_hw_intel, 1);
