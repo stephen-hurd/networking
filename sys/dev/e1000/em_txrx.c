@@ -556,7 +556,7 @@ lem_isc_rxd_available(void *arg, uint16_t rxqid, qidx_t idx, qidx_t budget)
 	struct e1000_rx_desc *rxd;
 	u32 staterr = 0;
 	int cnt, i;
-	budget = min(budget, scctx->isc_nrxd[0] -1);
+	budget = min(budget, scctx->isc_nrxd[0]);
 
 	for (cnt = 0, i = idx; cnt <= budget;) {
 		rxd = (struct e1000_rx_desc *)&rxr->rx_base[i];
@@ -585,7 +585,7 @@ em_isc_rxd_available(void *arg, uint16_t rxqid, qidx_t idx, qidx_t budget)
 	union e1000_rx_desc_extended *rxd;
 	u32 staterr = 0;
 	int cnt, i;
-	budget = min(budget, scctx->isc_nrxd[0] -1);
+	budget = min(budget, scctx->isc_nrxd[0]);
 
 	for (cnt = 0, i = idx; cnt <= budget;) {
 		rxd = &rxr->rx_base[i];
