@@ -894,7 +894,7 @@ netmap_fl_refill(iflib_rxq_t rxq, struct netmap_kring *kring, uint32_t nm_i, boo
 {
 	struct netmap_adapter *na = kring->na;
 	u_int const lim = kring->nkr_num_slots - 1;
-	u_int const head = kring->rhead;
+	u_int head = kring->rhead;
 	struct netmap_ring *ring = kring->ring;
 	bus_dmamap_t *map;
 	if_rxd_update_t iru;
@@ -905,13 +905,17 @@ netmap_fl_refill(iflib_rxq_t rxq, struct netmap_kring *kring, uint32_t nm_i, boo
 	iru = &rxq->ifr_iru;
 	iru_init(iru, rxq, 0 /* flid */);
 	map = fl->ifl_sds.ifsd_map;
-	refill_pidx = nic_i = netmap_idx_k2n(kring, nm_i);
+	refill_pidx = netmap_idx_k2n(kring, nm_i);
+	if (init && (nm_i == head))
+		head = nm_prev(head, lim);
 	for (int tmp_pidx = 0; nm_i != head; tmp_pidx++) {
 		struct netmap_slot *slot = &ring->slot[nm_i];
 		void *addr = PNMB(na, slot, &fl->ifl_bus_addrs[tmp_pidx]);
 		uint32_t nic_i_dma = refill_pidx;
+		nic_i = netmap_idx_k2n(kring, nm_i);
 
 		MPASS(tmp_pidx < IFLIB_MAX_RX_REFRESH);
+
 		if (addr == NETMAP_BUF_BASE(na)) /* bad buf */
 		        return netmap_ring_reinit(kring);
 
@@ -941,6 +945,7 @@ netmap_fl_refill(iflib_rxq_t rxq, struct netmap_kring *kring, uint32_t nm_i, boo
 		for (int n = 0; n < iru->iru_count; n++) {
 			bus_dmamap_sync(fl->ifl_ifdi->idi_tag, map[nic_i_dma],
 					BUS_DMASYNC_PREREAD);
+			/* XXX - change this to not use the netmap func*/
 			nic_i_dma = nm_next(nic_i_dma, lim);
 		}
 	}
