@@ -1120,7 +1120,7 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 	struct netmap_adapter *na = kring->na;
 	struct netmap_ring *ring = kring->ring;
 	uint32_t nm_i;	/* index into the netmap ring */
-	uint32_t nic_i, nic_i_start;	/* index into the NIC ring */
+	uint32_t nic_i;	/* index into the NIC ring */
 	u_int i, n;
 	u_int const lim = kring->nkr_num_slots - 1;
 	u_int const head = kring->rhead;
@@ -1209,64 +1209,7 @@ iflib_netmap_rxsync(struct netmap_kring *kring, int flags)
 	if (nm_i == head)
 		return (0);
 
-	fl = rxq->ifr_fl;
-	iru->iru_paddrs = fl->ifl_bus_addrs;
-	iru->iru_vaddrs = &fl->ifl_vm_addrs[0];
-	iru->iru_idxs = fl->ifl_rxd_idxs;
-	iru->iru_qsidx = rxq->ifr_id;
-	iru->iru_buf_size = fl->ifl_buf_size;
-	iru->iru_flidx = fl->ifl_id;
-	nic_i_start = nic_i = netmap_idx_k2n(kring, nm_i);
-	for (i = 0; nm_i != head; i++) {
-		struct netmap_slot *slot = &ring->slot[nm_i];
-		void *addr = PNMB(na, slot, &fl->ifl_bus_addrs[i]);
-
-		if (addr == NETMAP_BUF_BASE(na)) /* bad buf */
-			goto ring_reset;
-
-		fl->ifl_vm_addrs[i] = addr;
-		if (fl->ifl_sds.ifsd_map && (slot->flags & NS_BUF_CHANGED)) {
-			/* buffer has changed, reload map */
-			netmap_reload_map(na, fl->ifl_ifdi->idi_tag, fl->ifl_sds.ifsd_map[nic_i], addr);
-		}
-		slot->flags &= ~NS_BUF_CHANGED;
-
-		nm_i = nm_next(nm_i, lim);
-		fl->ifl_rxd_idxs[i] = nic_i = nm_next(nic_i, lim);
-		if (nm_i != head && i < IFLIB_MAX_RX_REFRESH)
-			continue;
-
-		iru->iru_pidx = nic_i_start;
-		iru->iru_count = i;
-		i = 0;
-		ctx->isc_rxd_refill(ctx->ifc_softc, iru);
-		if (fl->ifl_sds.ifsd_map == NULL) {
-			nic_i_start = nic_i;
-			continue;
-		}
-		nic_i = nic_i_start;
-		for (n = 0; n < iru->iru_count; n++) {
-			bus_dmamap_sync(fl->ifl_ifdi->idi_tag, fl->ifl_sds.ifsd_map[nic_i],
-					BUS_DMASYNC_PREREAD);
-			nic_i = nm_next(nic_i, lim);
-		}
-		nic_i_start = nic_i;
-	}
-	kring->nr_hwcur = head;
-
-	if (fl->ifl_sds.ifsd_map)
-		bus_dmamap_sync(fl->ifl_ifdi->idi_tag, fl->ifl_ifdi->idi_map,
-				BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
-	/*
-	 * IMPORTANT: we must leave one free slot in the ring,
-	 * so move nic_i back by one unit
-	 */
-	nic_i = nm_prev(nic_i, lim);
-	ctx->isc_rxd_flush(ctx->ifc_softc, rxq->ifr_id, fl->ifl_id, nic_i);
-	return (0);
-
-ring_reset:
-	return netmap_ring_reinit(kring);
+	return (netmap_fl_refill(rxq, kring, nm_i, false));
 }
 
 static void
