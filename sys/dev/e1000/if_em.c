@@ -1944,12 +1944,11 @@ igb_intr_assign(if_ctx_t ctx, int msix)
 
         vector = 0;
         for (i = 0; i < adapter->tx_num_queues; i++, tx_que++, vector++) {
-                rid = vector + 1;
                 snprintf(buf, sizeof(buf), "txq%d", i);
                 tx_que = &adapter->tx_queues[i];
+		tx_que->msix = adapter->rx_queues[i % adapter->rx_num_queues].msix;
+		rid = rman_get_start(adapter->rx_queues[i % adapter->rx_num_queues].que_irq.ii_res);
                 iflib_softirq_alloc_generic(ctx, rid, IFLIB_INTR_TX, tx_que, tx_que->me, buf);
-
-                tx_que->msix = (vector % adapter->tx_num_queues);
 
                 if (adapter->hw.mac.type == e1000_82574) {
                         tx_que->eims = 1 << (22 + i);
