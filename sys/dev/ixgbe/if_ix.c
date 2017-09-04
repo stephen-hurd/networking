@@ -2036,7 +2036,7 @@ ixgbe_if_msix_intr_assign(if_ctx_t ctx, int msix)
 #endif
 
 	}
-	for (int i = 0, rid = 1; i < adapter->num_tx_queues; i++, rid++) {
+	for (int i = 0; i < adapter->num_tx_queues; i++) {
 		snprintf(buf, sizeof(buf), "txq%d", i);
 		tx_que = &adapter->tx_queues[i];
 		tx_que->msix = adapter->rx_queues[i % adapter->num_rx_queues].msix;
