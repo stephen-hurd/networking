@@ -140,6 +140,7 @@ static s32 e1000_init_phy_params_82571(struct e1000_hw *hw)
 		break;
 	case e1000_82574:
 	case e1000_82583:
+		E1000_MUTEX_INIT(&hw->dev_spec._82571.swflag_mutex);
 
 		phy->type		= e1000_phy_bm;
 		phy->ops.get_cfg_done	= e1000_get_cfg_done_generic;
@@ -502,7 +503,7 @@ static s32 e1000_get_phy_id_82571(struct e1000_hw *hw)
 }
 
 /**
- *  e1000_get_hw_semaphore_82574 - Acquire hardware semaphore
+ *  e1000_get_hw_semaphore_82573 - Acquire hardware semaphore
  *  @hw: pointer to the HW structure
  *
  *  Acquire the HW semaphore during reset.
@@ -513,10 +514,13 @@ e1000_get_hw_semaphore_82574(struct e1000_hw *hw)
 {
 	u32 extcnf_ctrl;
 	s32 i = 0;
+#ifdef INVARIANTS
+	struct e1000_osdep *os = hw->back;
+#endif
 	/* XXX assert that mutex is held */
 	DEBUGFUNC("e1000_get_hw_semaphore_82573");
 
-	ASSERT_CTX_LOCK_HELD(hw);
+	sx_assert(iflib_ctx_lock_get(os->ctx), SX_XLOCKED);
 	extcnf_ctrl = E1000_READ_REG(hw, E1000_EXTCNF_CTRL);
 	do {
 		extcnf_ctrl |= E1000_EXTCNF_CTRL_MDIO_SW_OWNERSHIP;
