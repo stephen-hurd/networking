@@ -1315,6 +1315,7 @@ prefetch2(void *x)
 }
 #else
 #define prefetch(x)
+#define prefetch2(x)
 #endif
 
 static void
