@@ -5083,6 +5083,7 @@ iflib_irq_alloc(if_ctx_t ctx, if_irq_t irq, int rid,
 	return (_iflib_irq_alloc(ctx, irq, rid, filter, handler, arg, name));
 }
 
+#ifdef SMP
 static int
 find_nth(if_ctx_t ctx, cpuset_t *cpus, int qid)
 {
@@ -5170,6 +5171,11 @@ get_thread_num(if_ctx_t ctx, iflib_intr_type_t type, int qid)
 		return -1;
 	}
 }
+#else
+#define get_thread_num(ctx, type, qid)	0
+#define find_thread(cpuid, tid)		0
+#define find_nth(ctx, cpus, gid)	0
+#endif
 
 /* Just to avoid copy/paste */
 static inline int
