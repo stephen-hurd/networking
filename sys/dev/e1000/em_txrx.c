@@ -65,8 +65,6 @@ static void lem_receive_checksum(int status, int errors, if_rxd_info_t ri);
 static void em_receive_checksum(uint32_t status, if_rxd_info_t ri);
 static int em_determine_rsstype(u32 pkt_info);
 extern int em_intr(void *arg);
-static int em_isc_txd_errata(void *arg, struct mbuf **mp);
-static int lem_isc_txd_errata(void *arg, struct mbuf **mp);
 
 
 struct if_txrx em_txrx = {
@@ -78,7 +76,6 @@ struct if_txrx em_txrx = {
 	em_isc_rxd_refill,
 	em_isc_rxd_flush,
 	em_intr,
-	em_isc_txd_errata
 };
 
 struct if_txrx lem_txrx = {
@@ -90,7 +87,6 @@ struct if_txrx lem_txrx = {
 	lem_isc_rxd_refill,
 	em_isc_rxd_flush,
 	em_intr,
-	lem_isc_txd_errata
 };
 
 extern if_shared_ctx_t em_sctx;
@@ -810,27 +806,4 @@ em_receive_checksum(uint32_t status, if_rxd_info_t ri)
 		ri->iri_csum_flags |= (CSUM_DATA_VALID | CSUM_PSEUDO_HDR);
 		ri->iri_csum_data = htons(0xffff);
 	}
-}
-
-static int
-em_isc_txd_errata(void *arg, struct mbuf **mp)
-{
-	return (0);
-}
-
-static int
-lem_isc_txd_errata(void *arg, struct mbuf **mp)
-{
-#ifdef notyet
-	if ((sctx->isc_flags & IFLIB_NEED_SCRATCH) &&
-	    M_WRITABLE(m) == 0) {
-		if ((m = m_dup(m, M_NOWAIT)) == NULL) {
-			return (ENOMEM);
-		} else {
-			m_freem(*mp);
-			n = *mp = m;
-		}
-	}
-#endif
-	return (0);
 }
