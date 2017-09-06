@@ -5086,20 +5086,21 @@ iflib_irq_alloc(if_ctx_t ctx, if_irq_t irq, int rid,
 
 #ifdef SMP
 static int
-find_nth(if_ctx_t ctx, cpuset_t *cpus, int qid)
+find_nth(if_ctx_t ctx, int qid)
 {
+	cpuset_t cpus;
 	int i, cpuid, eqid, count;
 
-	CPU_COPY(&ctx->ifc_cpus, cpus);
+	CPU_COPY(&ctx->ifc_cpus, &cpus);
 	count = CPU_COUNT(&ctx->ifc_cpus);
 	eqid = qid % count;
 	/* clear up to the qid'th bit */
 	for (i = 0; i < eqid; i++) {
-		cpuid = CPU_FFS(cpus);
+		cpuid = CPU_FFS(&cpus);
 		MPASS(cpuid != 0);
-		CPU_CLR(cpuid-1, cpus);
+		CPU_CLR(cpuid-1, &cpus);
 	}
-	cpuid = CPU_FFS(cpus);
+	cpuid = CPU_FFS(&cpus);
 	MPASS(cpuid != 0);
 	return (cpuid-1);
 }
@@ -5175,7 +5176,7 @@ get_thread_num(if_ctx_t ctx, iflib_intr_type_t type, int qid)
 #else
 #define get_thread_num(ctx, type, qid)	0
 #define find_thread(cpuid, tid)		0
-#define find_nth(ctx, cpus, gid)	0
+#define find_nth(ctx, gid)		0
 #endif
 
 /* Just to avoid copy/paste */
@@ -5183,11 +5184,10 @@ static inline int
 iflib_irq_set_affinity(if_ctx_t ctx, int irq, iflib_intr_type_t type, int qid,
     struct grouptask *gtask, struct taskqgroup *tqg, void *uniq, char *name)
 {
-	cpuset_t cpus;
 	int cpuid;
 	int err, tid;
 
-	cpuid = find_nth(ctx, &cpus, qid);
+	cpuid = find_nth(ctx, qid);
 	tid = get_thread_num(ctx, type, qid);
 	MPASS(tid >= 0);
 	cpuid = find_thread(cpuid, tid);
