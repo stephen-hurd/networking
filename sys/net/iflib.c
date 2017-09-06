@@ -2845,7 +2845,9 @@ static int
 iflib_parse_header(iflib_txq_t txq, if_pkt_info_t pi, struct mbuf **mp)
 {
 	if_ctx_t ctx = txq->ift_ctx;
+#ifdef INET
 	if_shared_ctx_t sctx = ctx->ifc_sctx;
+#endif
 	if_softc_ctx_t scctx = &ctx->ifc_softc_ctx;
 	struct ether_vlan_header *eh;
 	struct mbuf *m, *n;
