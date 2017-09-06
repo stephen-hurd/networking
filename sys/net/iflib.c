@@ -533,7 +533,7 @@ typedef struct if_rxsd {
 #define RXD_INFO_SIZE	5
 #define PKT_TYPE uint64_t
 #else
-#define PKT_INFO_SIZE	13
+#define PKT_INFO_SIZE	12
 #define RXD_INFO_SIZE	8
 #define PKT_TYPE uint32_t
 #endif
