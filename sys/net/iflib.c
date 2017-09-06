@@ -3745,7 +3745,6 @@ _task_fn_admin(void *context)
 	iflib_txq_t txq;
 	int i, running;
 
-	running = !!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING);
 	CTX_LOCK(ctx);
 	running = !!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING);
 
