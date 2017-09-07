@@ -597,10 +597,6 @@ static int iflib_timer_int;
 SYSCTL_INT(_net_iflib, OID_AUTO, timer_int, CTLFLAG_RW, &iflib_timer_int,
     0, "interval at which to run per-queue timers (in ticks)");
 
-static int enable_msix = 1;
-SYSCTL_INT(_net_iflib, OID_AUTO, enable_msix, CTLFLAG_RDTUN, &enable_msix,
-    1, "enable msix");
-
 static int force_busdma = 0;
 SYSCTL_INT(_net_iflib, OID_AUTO, force_busdma, CTLFLAG_RDTUN, &force_busdma,
     1, "force busdma");
