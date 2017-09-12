@@ -4515,11 +4515,10 @@ iflib_device_deregister(if_ctx_t ctx)
 	CTX_UNLOCK(ctx);
 	CTX_LOCK_DESTROY(ctx);
 	device_set_softc(ctx->ifc_dev, NULL);
-	if (ctx->ifc_softc_ctx.isc_intr != IFLIB_INTR_LEGACY) {
-		pci_release_msi(dev);
-	}
-	if (ctx->ifc_softc_ctx.isc_intr != IFLIB_INTR_MSIX) {
+	if (ctx->ifc_softc_ctx.isc_intr == IFLIB_INTR_LEGACY) {
 		iflib_irq_free(ctx, &ctx->ifc_legacy_irq);
+	} else {
+		pci_release_msi(dev);
 	}
 	if (ctx->ifc_msix_mem != NULL) {
 		bus_release_resource(ctx->ifc_dev, SYS_RES_MEMORY,
