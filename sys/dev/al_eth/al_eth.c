@@ -1589,6 +1589,7 @@ al_eth_rx_recv_work(void *arg, int pending)
 	uint32_t refill_required;
 	uint32_t refill_actual;
 	uint32_t do_if_input;
+	struct mbuf *m_head, *tail, *tmphead;
 
 	if (napi != 0) {
 		rx_ring->enqueue_is_running = 1;
@@ -1675,10 +1676,15 @@ al_eth_rx_recv_work(void *arg, int pending)
 		    "%s: not filling rx queue %d\n", __func__, qid);
 	}
 
+	m_head = tail = NULL;
 	while (((queued = LIST_FIRST(&rx_ring->lro.lro_active)) != NULL)) {
 		LIST_REMOVE(queued, next);
-		tcp_lro_flush(&rx_ring->lro, queued);
+		tmphead = tcp_lro_flush(&rx_ring->lro, queued, &tail);
+		if (m_head == NULL)
+			m_head = tmphead;
 	}
+	if (m_head)
+		(rx_ring->lro->ifp->if_input)(rx_ring->lro->ifp, m_head);
 
 	if (napi != 0) {
 		rx_ring->enqueue_is_running = 0;

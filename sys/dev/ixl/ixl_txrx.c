@@ -1757,10 +1757,17 @@ next_desc:
 	tcp_lro_flush_all(lro);
 #else
 	struct lro_entry *queued;
+	struct mbuf *m_head, *tail, *tmphead;
+
+	m_head = tail = NULL;
 	while ((queued = SLIST_FIRST(&lro->lro_active)) != NULL) {
 		SLIST_REMOVE_HEAD(&lro->lro_active, next);
-		tcp_lro_flush(lro, queued);
+		tmphead = tcp_lro_flush(lro, queued, &tail);
+		if (m_head == NULL)
+			m_head = tmphead;
 	}
+	if (m_head)
+		(lro->ifp->if_input)(lro->ifp, m_head);
 #endif
 #endif /* defined(INET6) || defined(INET) */
 

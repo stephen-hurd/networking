@@ -486,12 +486,18 @@ qlnx_fp_taskqueue(void *context, int pending)
 
 #else
 			struct lro_entry *queued;
+			struct mbuf *m_head, *tail, *tmphead;
 
+			m_head = tail = NULL;
 			while ((!SLIST_EMPTY(&lro->lro_active))) {
 				queued = SLIST_FIRST(&lro->lro_active);
 				SLIST_REMOVE_HEAD(&lro->lro_active, next);
-				tcp_lro_flush(lro, queued);
+				tmphead = tcp_lro_flush(lro, queued, &tail);
+				if (m_head == NULL)
+					m_head = tmphead;
 			}
+			if (m_head)
+				(lro->ifp->if_input)(lro->ifp, m_head);
 #endif /* #if (__FreeBSD_version >= 1100101) || (defined QLNX_QSORT_LRO) */
 		}
 	}
@@ -4681,13 +4687,19 @@ qlnx_fp_isr(void *arg)
 
 #else
                                 struct lro_entry *queued;
+				struct mbuf *m_head, *tail, *tmphead;
 
+				m_head = tail = NULL;
                                 while ((!SLIST_EMPTY(&lro->lro_active))) {
                                         queued = SLIST_FIRST(&lro->lro_active);
                                         SLIST_REMOVE_HEAD(&lro->lro_active, \
                                                 next);
-                                        tcp_lro_flush(lro, queued);
+					tmphead = tcp_lro_flush(lro, queued, &tail);
+					if (m_head == NULL)
+						m_head = tmphead;
                                 }
+				if (m_head)
+					(lro->ifp->if_input)(lro->ifp, m_head);
 #endif /* #if (__FreeBSD_version >= 1100101) || (defined QLNX_QSORT_LRO) */
                         }
                 }
@@ -7052,12 +7064,18 @@ qlnx_drain_soft_lro(qlnx_host_t *ha)
 
 #else
 			struct lro_entry *queued;
+			struct mbuf *m_head, *tail, *tmphead;
 
+			m_head = tail = NULL;
 			while ((!SLIST_EMPTY(&lro->lro_active))){
 				queued = SLIST_FIRST(&lro->lro_active);
 				SLIST_REMOVE_HEAD(&lro->lro_active, next);
-				tcp_lro_flush(lro, queued);
+				tmphead = tcp_lro_flush(lro, queued, &tail);
+				if (m_head == NULL)
+					m_head = tmphead;
 			}
+			if (m_head)
+				(lro->ifp->if_input)(lro->ifp, m_head);
 
 #endif /* #if (__FreeBSD_version >= 1100101) || (defined QLNX_QSORT_LRO) */
 

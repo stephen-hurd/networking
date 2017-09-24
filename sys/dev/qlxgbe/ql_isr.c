@@ -739,12 +739,18 @@ ql_rcv_isr(qla_host_t *ha, uint32_t sds_idx, uint32_t count)
 
 #else
 		struct lro_entry *queued;
+		struct mbuf *m_head, *tail, *tmphead;
 
+		m_head = tail = NULL;
 		while ((!SLIST_EMPTY(&lro->lro_active))) {
 			queued = SLIST_FIRST(&lro->lro_active);
 			SLIST_REMOVE_HEAD(&lro->lro_active, next);
-			tcp_lro_flush(lro, queued);
+			tmphead = tcp_lro_flush(lro, queued, &tail);
+			if (m_head == NULL)
+				m_head = tmphead;
 		}
+		if (m_head)
+			(lro->ifp->if_input)(lro->ifp, m_head);
 
 #endif /* #if (__FreeBSD_version >= 1100101) */
 

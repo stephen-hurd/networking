@@ -278,11 +278,17 @@ static void
 tcp_lro_rx_done(struct lro_ctrl *lc)
 {
 	struct lro_entry *le;
+	struct mbuf *m_head, *tail, *tmphead;
 
+	head = tail = NULL;
 	while ((le = LIST_FIRST(&lc->lro_active)) != NULL) {
 		tcp_lro_active_remove(le);
-		tcp_lro_flush(lc, le);
+		tmphead = tcp_lro_flush(lc, le, &tail);
+		if (m_head == NULL)
+			m_head = tmphead;
 	}
+	if (m_head)
+		(*lc->ifp->if_input)(lc->ifp, m_head);
 }
 
 void
@@ -290,23 +296,30 @@ tcp_lro_flush_inactive(struct lro_ctrl *lc, const struct timeval *timeout)
 {
 	struct lro_entry *le, *le_tmp;
 	struct timeval tv;
+	struct mbuf *m_head, *tail, *tmphead;
 
 	if (LIST_EMPTY(&lc->lro_active))
 		return;
 
 	getmicrotime(&tv);
 	timevalsub(&tv, timeout);
+	head = tail = NULL;
 	LIST_FOREACH_SAFE(le, &lc->lro_active, next, le_tmp) {
 		if (timevalcmp(&tv, &le->mtime, >=)) {
 			tcp_lro_active_remove(le);
-			tcp_lro_flush(lc, le);
+			tmphead = tcp_lro_flush(lc, le, &tail);
+			if (m_head == NULL)
+				m_head = tmphead;
 		}
 	}
+	if (m_head)
+		(*lc->ifp->if_input)(lc->ifp, m_head);
 }
 
 void
-tcp_lro_flush(struct lro_ctrl *lc, struct lro_entry *le)
+tcp_lro_flush(struct lro_ctrl *lc, struct lro_entry *le, struct mbuf **tail)
 {
+	struct mbuf *ret_mbuf;
 
 	if (le->append_cnt > 0) {
 		struct tcphdr *th;
@@ -392,10 +405,16 @@ tcp_lro_flush(struct lro_ctrl *lc, struct lro_entry *le)
 
 	le->m_head->m_pkthdr.lro_nsegs = le->append_cnt + 1;
 	(*lc->ifp->if_input)(lc->ifp, le->m_head);
+	if (*tail)
+		*tail->m_next = le->m_head;
+	*tail = le->m_tail;
+	ret_mbuf = le->m_head;
+
 	lc->lro_queued += le->append_cnt + 1;
 	lc->lro_flushed++;
 	bzero(le, sizeof(*le));
 	LIST_INSERT_HEAD(&lc->lro_free, le, next);
+	return ret_mbuf;
 }
 
 #ifdef HAVE_INLINE_FLSLL
@@ -613,6 +632,7 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 	uint16_t eh_type, tcp_data_len;
 	struct lro_head *bucket;
 	int force_flush = 0;
+	struct mbuf *m_head, *tail, *tmphead;
 
 	/* We expect a contiguous header [eh, ip, tcp]. */
 
@@ -751,6 +771,7 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 	}
 
 	/* Try to find a matching previous segment. */
+	head = tail = NULL;
 	LIST_FOREACH(le, bucket, hash_next) {
 		if (le->eh_type != eh_type)
 			continue;
@@ -779,14 +800,20 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 		if (force_flush) {
 			/* Timestamps mismatch; this is a FIN, etc */
 			tcp_lro_active_remove(le);
-			tcp_lro_flush(lc, le);
+			tmphead = tcp_lro_flush(lc, le, &tail);
+			if (m_head == NULL)
+				m_head = tmphead;
+			if (m_head)
+				(*lc->ifp->if_input)(lc->ifp, m_head);
 			return (TCP_LRO_CANNOT);
 		}
 
 		/* Flush now if appending will result in overflow. */
 		if (le->p_len > (lc->lro_length_lim - tcp_data_len)) {
 			tcp_lro_active_remove(le);
-			tcp_lro_flush(lc, le);
+			tmphead = tcp_lro_flush(lc, le, &tail);
+			if (m_head == NULL)
+				m_head = tmphead;
 			break;
 		}
 
@@ -795,7 +822,11 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 		    (tcp_data_len == 0 && le->ack_seq == th->th_ack))) {
 			/* Out of order packet or duplicate ACK. */
 			tcp_lro_active_remove(le);
-			tcp_lro_flush(lc, le);
+			tmphead = tcp_lro_flush(lc, le, &tail);
+			if (m_head == NULL)
+				m_head = tmphead;
+			if (m_head)
+				(*lc->ifp->if_input)(lc->ifp, m_head);
 			return (TCP_LRO_CANNOT);
 		}
 
@@ -804,8 +835,11 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 			/* Make sure timestamp values are increasing. */
 			/* XXX-BZ flip and use TSTMP_GEQ macro for this? */
 			if (__predict_false(le->tsval > tsval ||
-			    *(ts_ptr + 2) == 0))
+			    *(ts_ptr + 2) == 0)) {
+				if (m_head)
+					(*lc->ifp->if_input)(lc->ifp, m_head);
 				return (TCP_LRO_CANNOT);
+			}
 			le->tsval = tsval;
 			le->tsecr = *(ts_ptr + 2);
 		}
@@ -828,8 +862,12 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 			 */
 			if (le->append_cnt >= lc->lro_ackcnt_lim) {
 				tcp_lro_active_remove(le);
-				tcp_lro_flush(lc, le);
+				tmphead = tcp_lro_flush(lc, le, &tail);
+				if (m_head == NULL)
+					m_head = tmphead;
 			}
+			if (m_head)
+				(*lc->ifp->if_input)(lc->ifp, m_head);
 			return (0);
 		}
 
@@ -852,10 +890,14 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 		 */
 		if (le->p_len > (lc->lro_length_lim - lc->ifp->if_mtu)) {
 			tcp_lro_active_remove(le);
-			tcp_lro_flush(lc, le);
+			tmphead = tcp_lro_flush(lc, le, &tail);
+			if (m_head == NULL)
+				m_head = tmphead;
 		} else
 			getmicrotime(&le->mtime);
 
+		if (m_head)
+			(*lc->ifp->if_input)(lc->ifp, m_head);
 		return (0);
 	}
 
@@ -864,12 +906,17 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 		 * Nothing to flush, but this segment can not be further
 		 * aggregated/delayed.
 		 */
+		if (m_head)
+			(*lc->ifp->if_input)(lc->ifp, m_head);
 		return (TCP_LRO_CANNOT);
 	}
 
 	/* Try to find an empty slot. */
-	if (LIST_EMPTY(&lc->lro_free))
+	if (LIST_EMPTY(&lc->lro_free)) {
+		if (m_head)
+			(*lc->ifp->if_input)(lc->ifp, m_head);
 		return (TCP_LRO_NO_ENTRIES);
+	}
 
 	/* Start a new segment chain. */
 	le = LIST_FIRST(&lc->lro_free);
@@ -928,6 +975,8 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 
 	le->m_head = m;
 	le->m_tail = m_last(m);
+	if (m_head)
+		(*lc->ifp->if_input)(lc->ifp, m_head);
 
 	return (0);
 }
