@@ -280,7 +280,7 @@ tcp_lro_rx_done(struct lro_ctrl *lc)
 	struct lro_entry *le;
 	struct mbuf *m_head, *tail, *tmphead;
 
-	head = tail = NULL;
+	m_head = tail = NULL;
 	while ((le = LIST_FIRST(&lc->lro_active)) != NULL) {
 		tcp_lro_active_remove(le);
 		tmphead = tcp_lro_flush(lc, le, &tail);
@@ -303,7 +303,7 @@ tcp_lro_flush_inactive(struct lro_ctrl *lc, const struct timeval *timeout)
 
 	getmicrotime(&tv);
 	timevalsub(&tv, timeout);
-	head = tail = NULL;
+	m_head = tail = NULL;
 	LIST_FOREACH_SAFE(le, &lc->lro_active, next, le_tmp) {
 		if (timevalcmp(&tv, &le->mtime, >=)) {
 			tcp_lro_active_remove(le);
@@ -316,7 +316,7 @@ tcp_lro_flush_inactive(struct lro_ctrl *lc, const struct timeval *timeout)
 		(*lc->ifp->if_input)(lc->ifp, m_head);
 }
 
-void
+struct mbuf *
 tcp_lro_flush(struct lro_ctrl *lc, struct lro_entry *le, struct mbuf **tail)
 {
 	struct mbuf *ret_mbuf;
@@ -406,7 +406,7 @@ tcp_lro_flush(struct lro_ctrl *lc, struct lro_entry *le, struct mbuf **tail)
 	le->m_head->m_pkthdr.lro_nsegs = le->append_cnt + 1;
 	(*lc->ifp->if_input)(lc->ifp, le->m_head);
 	if (*tail)
-		*tail->m_next = le->m_head;
+		(*tail)->m_next = le->m_head;
 	*tail = le->m_tail;
 	ret_mbuf = le->m_head;
 
@@ -771,7 +771,7 @@ tcp_lro_rx2(struct lro_ctrl *lc, struct mbuf *m, uint32_t csum, int use_hash)
 	}
 
 	/* Try to find a matching previous segment. */
-	head = tail = NULL;
+	m_head = tail = NULL;
 	LIST_FOREACH(le, bucket, hash_next) {
 		if (le->eh_type != eh_type)
 			continue;

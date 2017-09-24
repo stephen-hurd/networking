@@ -109,7 +109,7 @@ int tcp_lro_init(struct lro_ctrl *);
 int tcp_lro_init_args(struct lro_ctrl *, struct ifnet *, unsigned, unsigned);
 void tcp_lro_free(struct lro_ctrl *);
 void tcp_lro_flush_inactive(struct lro_ctrl *, const struct timeval *);
-void tcp_lro_flush(struct lro_ctrl *, struct lro_entry *, struct mbuf **tail);
+struct mbuf *tcp_lro_flush(struct lro_ctrl *, struct lro_entry *, struct mbuf **tail);
 void tcp_lro_flush_all(struct lro_ctrl *);
 int tcp_lro_rx(struct lro_ctrl *, struct mbuf *, uint32_t);
 void tcp_lro_queue_mbuf(struct lro_ctrl *, struct mbuf *);
